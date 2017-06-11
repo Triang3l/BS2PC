@@ -5,7 +5,7 @@ Converts Half-Life PlayStation 2 (`.bs2`) maps to PC (`.bsp`).
 
 Usage: `bs2pc path_to_map.bs2` or drag and drop. The `.bsp` file will be placed in the `.bs2` directory.
 
-See the [Releases section](/releases) for the Windows binary.
+See the [Releases section](https://github.com/Triang3l/BS2PC/releases) for the Windows binary.
 
 Features:
 * Converts all sections of PlayStation 2 maps.
