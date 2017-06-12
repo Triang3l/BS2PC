@@ -135,7 +135,10 @@ typedef struct {
 	char name[16];
 	unsigned char unknown1[3];
 	unsigned char miplevels;
-	unsigned char unknown2[28];
+	unsigned char unknown2[8]; // gl_texturenum, texturechain (runtime)?
+	unsigned int anim_total;
+	unsigned int anim_min, anim_max;
+	bspoffset_t anim_next, alternate_anims;
 } dmiptex_gbx_t;
 
 typedef struct {
@@ -771,7 +774,9 @@ void BS2PC_ConvertTextures() {
 		paletteId = textureId + headerId->offsets[3] + (width >> 3) * (height >> 3);
 		*((unsigned short *) paletteId) = 256;
 		paletteId += sizeof(unsigned short);
-		liquid = (textureGbx->name[0] == '!');
+		liquid = (textureGbx->name[0] == '!') ||
+				(textureGbx->name[0] >= '0' && textureGbx->name[0] <= '9' && textureGbx->name[1] == '!') ||
+				((textureGbx->name[0] == '+' || textureGbx->name[0] == '-') && textureGbx->name[2] == '!');
 		for (colorIndex = 0; colorIndex < 256; ++colorIndex) {
 			unsigned int colorIndexGbx, colorIndexLow;
 			const unsigned char *colorGbx;
