@@ -82,7 +82,7 @@ enum {
 	LUMP_GBX_LIGHTING,
 	LUMP_GBX_TEXTURES,
 	LUMP_GBX_ENTITIES,
-	LUMP_GBX_UNKNOWN2,
+	LUMP_GBX_POLYS,
 
 	LUMP_GBX_COUNT
 };
@@ -199,7 +199,9 @@ typedef struct {
 	unsigned int numedges;
 	unsigned char unknown3[40];
 	unsigned char styles[MAX_LIGHTMAPS];
-	unsigned char unknown4[40];
+	unsigned char unknown4[24];
+	bspoffset_t polys;
+	unsigned char unknown5[12];
 } dface_gbx_t;
 
 #define NUM_AMBIENTS 4
