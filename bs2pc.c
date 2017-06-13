@@ -167,6 +167,11 @@ typedef struct {
 	unsigned char unknown1[4];
 } dnode_gbx_t;
 
+typedef struct {
+	unsigned int planenum;
+	short children[2];
+} dclipnode_t;
+
 #define TEX_SPECIAL 1
 
 typedef struct {
@@ -556,6 +561,26 @@ static void BS2PC_ConvertLeafsToId() {
 		id->firstmarksurface = (unsigned short) firstMarksurface;
 		id->nummarksurfaces = (unsigned short) marksurfaceCount;
 		memcpy(id->ambient_level, gbx->ambient_level, sizeof(id->ambient_level));
+	}
+}
+
+static void BS2PC_MakeGbxHull0() {
+	const dnode_id_t *id = (const dnode_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_NODES].fileofs);
+	const dleaf_id_t *idLeafs = (const dleaf_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_LEAFS].fileofs);
+	dclipnode_t *gbx = (dclipnode_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_HULL0]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_NODES].filelen / sizeof(dnode_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		gbx->planenum = id->planenum;
+		if (id->children[0] >= 0) {
+			gbx->children[0] = id->children[0];
+		} else {
+			gbx->children[0] = (short) idLeafs[-(id->children[0] + 1)].contents;
+		}
+		if (id->children[1] >= 0) {
+			gbx->children[1] = id->children[1];
+		} else {
+			gbx->children[1] = (short) idLeafs[-(id->children[1] + 1)].contents;
+		}
 	}
 }
 
