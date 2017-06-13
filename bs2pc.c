@@ -197,11 +197,14 @@ typedef struct {
 	unsigned char unknown2[4];
 	unsigned int firstedge;
 	unsigned int numedges;
-	unsigned char unknown3[40];
+	float unknown3;
+	short texturemins[2];
+	short extents[2];
+	unsigned char unknown4[28];
 	unsigned char styles[MAX_LIGHTMAPS];
-	unsigned char unknown4[24];
+	unsigned char unknown5[24];
 	bspoffset_t polys;
-	unsigned char unknown5[12];
+	unsigned char unknown6[12];
 } dface_gbx_t;
 
 #define NUM_AMBIENTS 4
