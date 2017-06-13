@@ -540,7 +540,7 @@ static void BS2PC_ConvertEntitiesToGbx() {
 					// stringStart[stringLength - 1] += 'l' - 'l';
 				} else if (stringLength >= 12 &&
 						strncasecmp(stringStart, "sprites/", 8) == 0 &&
-						strncasecmp(stringStart + stringLength - 4, ".dol", 4) == 0) {
+						strncasecmp(stringStart + stringLength - 4, ".spr", 4) == 0) {
 					// stringStart[stringLength - 3] += 's' - 's';
 					// stringStart[stringLength - 2] += 'p' - 'p';
 					stringStart[stringLength - 1] += 'z' - 'r';
