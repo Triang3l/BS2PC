@@ -405,7 +405,7 @@ static void BS2PC_RemapMarksurfaceFaceRange(unsigned int inFirst, unsigned int i
 	*outCount = count;
 }
 
-static void BS2PC_AllocateIDBSP() {
+static void BS2PC_AllocateIdBSP() {
 	const dheader_gbx_t *header_gbx = (const dheader_gbx_t *) bspfile_gbx;
 	dheader_id_t headerId;
 	unsigned int bspSize;
@@ -494,13 +494,19 @@ static void BS2PC_AllocateIDBSP() {
 	memcpy(header_id, &headerId, sizeof(dheader_id_t));
 }
 
-static void BS2PC_CopyLump(unsigned int gbxLump, unsigned int idLump) {
+static void BS2PC_CopyLumpToId(unsigned int gbxLump, unsigned int idLump) {
 	memcpy(bspfile_id + header_id->lumps[idLump].fileofs,
 			bspfile_gbx + header_gbx->lumpofs[gbxLump],
 			header_gbx->lumplen[gbxLump]);
 }
 
-static void BS2PC_ConvertPlanes() {
+static void BS2PC_CopyLumpToGbx(unsigned int idLump, unsigned int gbxLump) {
+	memcpy(bspfile_gbx + header_gbx->lumpofs[gbxLump],
+			bspfile_id + header_id->lumps[idLump].fileofs,
+			header_id->lumps[idLump].filelen);
+}
+
+static void BS2PC_ConvertPlanesToId() {
 	const dplane_gbx_t *gbx = (const dplane_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_PLANES]);
 	dplane_id_t *id = (dplane_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_PLANES].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_PLANES] / sizeof(dplane_gbx_t);
@@ -513,7 +519,7 @@ static void BS2PC_ConvertPlanes() {
 	}
 }
 
-static void BS2PC_ConvertLeafs() {
+static void BS2PC_ConvertLeafsToId() {
 	const dleaf_gbx_t *gbx = (const dleaf_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_LEAFS]);
 	dleaf_id_t *id = (dleaf_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_LEAFS].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_LEAFS] / sizeof(dleaf_gbx_t);
@@ -534,7 +540,7 @@ static void BS2PC_ConvertLeafs() {
 	}
 }
 
-static void BS2PC_ConvertVertexes() {
+static void BS2PC_ConvertVertexesToId() {
 	const dvertex_gbx_t *gbx = (const dvertex_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_VERTEXES]);
 	dvertex_id_t *id = (dvertex_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_VERTEXES].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_VERTEXES] / sizeof(dvertex_gbx_t);
@@ -545,7 +551,7 @@ static void BS2PC_ConvertVertexes() {
 	}
 }
 
-static void BS2PC_ConvertNodes() {
+static void BS2PC_ConvertNodesToId() {
 	const dnode_gbx_t *gbx = (const dnode_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_NODES]);
 	dnode_id_t *id = (dnode_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_NODES].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_NODES] / sizeof(dnode_gbx_t);
@@ -581,7 +587,7 @@ static void BS2PC_ConvertNodes() {
 	}
 }
 
-static void BS2PC_ConvertTexinfo() {
+static void BS2PC_ConvertTexinfoToId() {
 	const dface_gbx_t *gbx = (const dface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_FACES]);
 	dtexinfo_id_t *id = (dtexinfo_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_TEXINFO].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_FACES] / sizeof(dface_gbx_t);
@@ -597,7 +603,7 @@ static void BS2PC_ConvertTexinfo() {
 	}
 }
 
-static void BS2PC_ConvertFaces() {
+static void BS2PC_ConvertFacesToId() {
 	const dface_gbx_t *gbx = (const dface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_FACES]);
 	dface_id_t *id = (dface_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_FACES].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_FACES] / sizeof(dface_gbx_t);
@@ -618,7 +624,7 @@ static void BS2PC_ConvertFaces() {
 	}
 }
 
-static void BS2PC_ConvertMarksurfaces() {
+static void BS2PC_ConvertMarksurfacesToId() {
 	const dmarksurface_gbx_t *gbx;
 	dmarksurface_id_t *id = (dmarksurface_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_MARKSURFACES].fileofs);
 	unsigned int index, count;
@@ -635,7 +641,7 @@ static void BS2PC_ConvertMarksurfaces() {
 	}
 }
 
-static void BS2PC_ConvertModels() {
+static void BS2PC_ConvertModelsToId() {
 	const dmodel_gbx_t *gbx = (const dmodel_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MODELS]);
 	dmodel_id_t *id = (dmodel_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_MODELS].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_MODELS] / sizeof(dmodel_gbx_t);
@@ -649,7 +655,7 @@ static void BS2PC_ConvertModels() {
 	}
 }
 
-static void BS2PC_ConvertEntities() {
+static void BS2PC_ConvertEntitiesToId() {
 	const char *gbx = (const char *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_ENTITIES]);
 	char *id = (char *) (bspfile_id + header_id->lumps[LUMP_ID_ENTITIES].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_ENTITIES];
@@ -715,7 +721,7 @@ void BS2PC_ResampleTexture(unsigned char *in, int inwidth, int inheight, unsigne
 	}
 }
 
-void BS2PC_ConvertTextures() {
+void BS2PC_ConvertTexturesToId() {
 	const dmiptex_gbx_t *texturesGbx = (const dmiptex_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_TEXTURES]);
 	unsigned char *lumpId = bspfile_id + header_id->lumps[LUMP_ID_TEXTURES].fileofs;
 	unsigned int *miptexOffsets, miptexOffset;
@@ -924,37 +930,37 @@ int main(int argc, const char **argv) {
 	fputs("Building nodraw skipping info...\n", stderr);
 	BS2PC_InitializeNodraw();
 	fputs("Initializing the .bsp header...\n", stderr);
-	BS2PC_AllocateIDBSP();
+	BS2PC_AllocateIdBSP();
 	fputs("Converting planes...\n", stderr);
-	BS2PC_ConvertPlanes();
+	BS2PC_ConvertPlanesToId();
 	fputs("Converting leaves...\n", stderr);
-	BS2PC_ConvertLeafs();
+	BS2PC_ConvertLeafsToId();
 	fputs("Converting vertices...\n", stderr);
-	BS2PC_ConvertVertexes();
+	BS2PC_ConvertVertexesToId();
 	fputs("Converting nodes...\n", stderr);
-	BS2PC_ConvertNodes();
+	BS2PC_ConvertNodesToId();
 	fputs("Converting texture info...\n", stderr);
-	BS2PC_ConvertTexinfo();
+	BS2PC_ConvertTexinfoToId();
 	fputs("Converting faces...\n", stderr);
-	BS2PC_ConvertFaces();
+	BS2PC_ConvertFacesToId();
 	fputs("Copying clipnodes...\n", stderr);
-	BS2PC_CopyLump(LUMP_GBX_CLIPNODES, LUMP_ID_CLIPNODES);
+	BS2PC_CopyLumpToId(LUMP_GBX_CLIPNODES, LUMP_ID_CLIPNODES);
 	fputs("Converting marksurfaces...\n", stderr);
-	BS2PC_ConvertMarksurfaces();
+	BS2PC_ConvertMarksurfacesToId();
 	fputs("Copying surfedges...\n", stderr);
-	BS2PC_CopyLump(LUMP_GBX_SURFEDGES, LUMP_ID_SURFEDGES);
+	BS2PC_CopyLumpToId(LUMP_GBX_SURFEDGES, LUMP_ID_SURFEDGES);
 	fputs("Copying edges...\n", stderr);
-	BS2PC_CopyLump(LUMP_GBX_EDGES, LUMP_ID_EDGES);
+	BS2PC_CopyLumpToId(LUMP_GBX_EDGES, LUMP_ID_EDGES);
 	fputs("Converting models...\n", stderr);
-	BS2PC_ConvertModels();
+	BS2PC_ConvertModelsToId();
 	fputs("Copying lighting...\n", stderr);
-	BS2PC_CopyLump(LUMP_GBX_LIGHTING, LUMP_ID_LIGHTING);
+	BS2PC_CopyLumpToId(LUMP_GBX_LIGHTING, LUMP_ID_LIGHTING);
 	fputs("Copying visibility...\n", stderr);
-	BS2PC_CopyLump(LUMP_GBX_VISIBILITY, LUMP_ID_VISIBILITY);
+	BS2PC_CopyLumpToId(LUMP_GBX_VISIBILITY, LUMP_ID_VISIBILITY);
 	fputs("Converting entities...\n", stderr);
-	BS2PC_ConvertEntities();
+	BS2PC_ConvertEntitiesToId();
 	fputs("Converting textures...\n", stderr);
-	BS2PC_ConvertTextures();
+	BS2PC_ConvertTexturesToId();
 
 	fputs("Writing the .bsp file...\n", stderr);
 
