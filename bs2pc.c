@@ -247,7 +247,7 @@ typedef struct {
 	unsigned int headnode[MAX_MAP_HULLS];
 	unsigned int visleafs;
 	unsigned int firstface, numfaces;
-	unsigned char unknown1[4];
+	unsigned char pad[4];
 } dmodel_gbx_t;
 
 #pragma pack(pop)
@@ -259,8 +259,12 @@ typedef struct {
 static unsigned char *bspfile_gbx;
 static const dheader_gbx_t *header_gbx;
 
-inline unsigned int BS2PC_GBXOffsetToIndex(bspoffset_t offset, unsigned int lump, unsigned int lumpSize) {
+inline unsigned int BS2PC_GbxOffsetToIndex(bspoffset_t offset, unsigned int lump, unsigned int lumpSize) {
 	return (offset - header_gbx->lumpofs[lump]) / lumpSize;
+}
+
+inline bspoffset_t BS2PC_IndexToGbxOffset(unsigned int index, unsigned int lump, unsigned int lumpSize) {
+	return header_gbx->lumpofs[lump] + index * lumpSize;
 }
 
 static unsigned char *bspfile_id;
@@ -346,7 +350,7 @@ static void BS2PC_InitializeNodraw() {
 
 	for (faceIndex = 0, face = faces; faceIndex < faceCount; ++faceIndex, ++face) {
 		nodraw_face_map[faceIndex] = nodraw_face_count;
-		if (BS2PC_GBXOffsetToIndex(face->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
+		if (BS2PC_GbxOffsetToIndex(face->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
 			++nodraw_face_count;
 		}
 	}
@@ -354,7 +358,7 @@ static void BS2PC_InitializeNodraw() {
 	marksurface = (const dmarksurface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MARKSURFACES]);
 	for (marksurfaceIndex = 0; marksurfaceIndex < marksurfaceCount; ++marksurfaceIndex, ++marksurface) {
 		nodraw_marksurface_map[marksurfaceIndex] = nodraw_marksurface_count;
-		if (BS2PC_GBXOffsetToIndex(faces[*marksurface].miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
+		if (BS2PC_GbxOffsetToIndex(faces[*marksurface].miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
 			nodraw_marksurface_lump_id[nodraw_marksurface_count] = (unsigned short) nodraw_face_map[*marksurface];
 			++nodraw_marksurface_count;
 		}
@@ -375,7 +379,7 @@ static void BS2PC_RemapNodrawFaceRange(unsigned int inFirst, unsigned int inCoun
 	count = 0;
 	gbxFace = (const dface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_FACES]) + inFirst;
 	for (index = 0; index < inCount; ++index, ++gbxFace) {
-		if (BS2PC_GBXOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
+		if (BS2PC_GbxOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
 			++count;
 		}
 	}
@@ -398,7 +402,7 @@ static void BS2PC_RemapMarksurfaceFaceRange(unsigned int inFirst, unsigned int i
 	gbxMarksurface = (const dmarksurface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MARKSURFACES]) + inFirst;
 	for (index = 0; index < inCount; ++index, ++gbxMarksurface) {
 		gbxFace = (const dface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_FACES]) + *gbxMarksurface;
-		if (BS2PC_GBXOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
+		if (BS2PC_GbxOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != texture_nodraw) {
 			++count;
 		}
 	}
@@ -519,6 +523,21 @@ static void BS2PC_ConvertPlanesToId() {
 	}
 }
 
+static void BS2PC_ConvertPlanesToGbx() {
+	const dplane_id_t *id = (const dplane_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_PLANES].fileofs);
+	dplane_gbx_t *gbx = (dplane_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_PLANES]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_PLANES].filelen / sizeof(dplane_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		gbx->normal[0] = id->normal[0];
+		gbx->normal[1] = id->normal[1];
+		gbx->normal[2] = id->normal[2];
+		gbx->dist = id->dist;
+		gbx->type = id->type;
+		gbx->signbits = (id->normal[0] < 0.0f ? 1 : 0) | (id->normal[1] < 0.0f ? 2 : 0) | (id->normal[2] < 0.0f ? 4 : 0);
+		gbx->pad[0] = gbx->pad[1] = 0;
+	}
+}
+
 static void BS2PC_ConvertLeafsToId() {
 	const dleaf_gbx_t *gbx = (const dleaf_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_LEAFS]);
 	dleaf_id_t *id = (dleaf_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_LEAFS].fileofs);
@@ -551,6 +570,18 @@ static void BS2PC_ConvertVertexesToId() {
 	}
 }
 
+static void BS2PC_ConvertVertexesToGbx() {
+	const dvertex_id_t *id = (const dvertex_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_VERTEXES].fileofs);
+	dvertex_gbx_t *gbx = (dvertex_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_VERTEXES]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_VERTEXES].filelen / sizeof(dvertex_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		gbx->point[0] = id->point[0];
+		gbx->point[1] = id->point[1];
+		gbx->point[2] = id->point[2];
+		gbx->point[3] = 0.0f;
+	}
+}
+
 static void BS2PC_ConvertNodesToId() {
 	const dnode_gbx_t *gbx = (const dnode_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_NODES]);
 	dnode_id_t *id = (dnode_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_NODES].fileofs);
@@ -559,20 +590,20 @@ static void BS2PC_ConvertNodesToId() {
 		const dnode_gbx_t *child;
 		unsigned int firstFace, faceCount;
 
-		id->planenum = BS2PC_GBXOffsetToIndex(gbx->plane, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
+		id->planenum = BS2PC_GbxOffsetToIndex(gbx->plane, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
 
 		child = (const dnode_gbx_t *) (bspfile_gbx + gbx->children[0]);
 		if (child->contents == 0) {
-			id->children[0] = (short) BS2PC_GBXOffsetToIndex(gbx->children[0], LUMP_GBX_NODES, sizeof(dnode_gbx_t)); 
+			id->children[0] = (short) BS2PC_GbxOffsetToIndex(gbx->children[0], LUMP_GBX_NODES, sizeof(dnode_gbx_t)); 
 		} else {
-			id->children[0] = -1 - (short) BS2PC_GBXOffsetToIndex(gbx->children[0], LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
+			id->children[0] = -1 - (short) BS2PC_GbxOffsetToIndex(gbx->children[0], LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
 		}
 
 		child = (const dnode_gbx_t *) (bspfile_gbx + gbx->children[1]);
 		if (child->contents == 0) {
-			id->children[1] = (short) BS2PC_GBXOffsetToIndex(gbx->children[1], LUMP_GBX_NODES, sizeof(dnode_gbx_t)); 
+			id->children[1] = (short) BS2PC_GbxOffsetToIndex(gbx->children[1], LUMP_GBX_NODES, sizeof(dnode_gbx_t)); 
 		} else {
-			id->children[1] = -1 - (short) BS2PC_GBXOffsetToIndex(gbx->children[1], LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
+			id->children[1] = -1 - (short) BS2PC_GbxOffsetToIndex(gbx->children[1], LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
 		}
 
 		id->mins[0] = (short) gbx->mins[0];
@@ -592,7 +623,7 @@ static void BS2PC_ConvertTexinfoToId() {
 	dtexinfo_id_t *id = (dtexinfo_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_TEXINFO].fileofs);
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_FACES] / sizeof(dface_gbx_t);
 	for (index = 0; index < count; ++index, ++gbx) {
-		unsigned int miptex = BS2PC_GBXOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
+		unsigned int miptex = BS2PC_GbxOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
 		if (texture_nodraw != UINT_MAX && miptex == texture_nodraw) {
 			continue;
 		}
@@ -609,10 +640,10 @@ static void BS2PC_ConvertFacesToId() {
 	unsigned int index, count = header_gbx->lumplen[LUMP_GBX_FACES] / sizeof(dface_gbx_t);
 	unsigned int idIndex = 0;
 	for (index = 0; index < count; ++index, ++gbx) {
-		if (texture_nodraw != UINT_MAX && BS2PC_GBXOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) == texture_nodraw) {
+		if (texture_nodraw != UINT_MAX && BS2PC_GbxOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) == texture_nodraw) {
 			continue;
 		}
-		id->planenum = (unsigned short) BS2PC_GBXOffsetToIndex(gbx->plane, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
+		id->planenum = (unsigned short) BS2PC_GbxOffsetToIndex(gbx->plane, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
 		id->side = gbx->side;
 		id->firstedge = gbx->firstedge;
 		id->numedges = (unsigned short) gbx->numedges;
@@ -641,6 +672,15 @@ static void BS2PC_ConvertMarksurfacesToId() {
 	}
 }
 
+static void BS2PC_ConvertMarksurfacesToGbx() {
+	const dmarksurface_id_t *id = (const dmarksurface_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_MARKSURFACES].fileofs);
+	dmarksurface_gbx_t *gbx = (dmarksurface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MARKSURFACES]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_MARKSURFACES].filelen / sizeof(dmarksurface_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		*gbx = (dmarksurface_gbx_t) *id;
+	}
+}
+
 static void BS2PC_ConvertModelsToId() {
 	const dmodel_gbx_t *gbx = (const dmodel_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MODELS]);
 	dmodel_id_t *id = (dmodel_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_MODELS].fileofs);
@@ -652,6 +692,25 @@ static void BS2PC_ConvertModelsToId() {
 		memcpy(id->headnode, gbx->headnode, sizeof(id->headnode));
 		id->visleafs = gbx->visleafs;
 		BS2PC_RemapNodrawFaceRange(gbx->firstface, gbx->numfaces, &id->firstface, &id->numfaces);
+	}
+}
+
+static void BS2PC_ConvertModelsToGbx() {
+	const dmodel_id_t *id = (const dmodel_id_t *) (bspfile_id + header_id->lumps[LUMP_ID_MODELS].fileofs);
+	dmodel_gbx_t *gbx = (dmodel_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_MODELS]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_MODELS].filelen / sizeof(dmodel_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		memcpy(gbx->mins, id->mins, 3 * sizeof(float));
+		gbx->mins[3] = 0.0f;
+		memcpy(gbx->maxs, id->maxs, 3 * sizeof(float));
+		gbx->maxs[3] = 0.0f;
+		memcpy(gbx->origin, id->origin, 3 * sizeof(float));
+		gbx->origin[3] = 0.0f;
+		memcpy(gbx->headnode, id->headnode, sizeof(id->headnode));
+		gbx->visleafs = id->visleafs;
+		gbx->firstface = id->firstface;
+		gbx->numfaces = id->numfaces;
+		memset(gbx->pad, 0, sizeof(gbx->pad));
 	}
 }
 
@@ -685,6 +744,46 @@ static void BS2PC_ConvertEntitiesToId() {
 				stringStart = NULL;
 			} else {
 				stringStart = id + 1;
+				stringLength = 0;
+			}
+		} else {
+			if (stringStart != NULL) {
+				++stringLength;
+			}
+		}
+	}
+}
+
+static void BS2PC_ConvertEntitiesToGbx() {
+	const char *id = (const char *) (bspfile_id + header_id->lumps[LUMP_ID_ENTITIES].fileofs);
+	char *gbx = (char *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_ENTITIES]);
+	unsigned int index, count = header_id->lumps[LUMP_ID_ENTITIES].filelen;
+
+	char *stringStart = NULL;
+	unsigned int stringLength;
+
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		char character = *id;
+		*gbx = character;
+
+		if (character == '"') {
+			if (stringStart != NULL) {
+				if (stringLength >= 11 &&
+						strncasecmp(stringStart, "models/", 7) == 0 &&
+						strncasecmp(stringStart + stringLength - 4, ".mdl", 4) == 0) {
+					stringStart[stringLength - 3] += 'd' - 'm';
+					stringStart[stringLength - 2] += 'o' - 'd';
+					// stringStart[stringLength - 1] += 'l' - 'l';
+				} else if (stringLength >= 12 &&
+						strncasecmp(stringStart, "sprites/", 8) == 0 &&
+						strncasecmp(stringStart + stringLength - 4, ".dol", 4) == 0) {
+					// stringStart[stringLength - 3] += 's' - 's';
+					// stringStart[stringLength - 2] += 'p' - 'p';
+					stringStart[stringLength - 1] += 'z' - 'r';
+				}
+				stringStart = NULL;
+			} else {
+				stringStart = gbx + 1;
 				stringLength = 0;
 			}
 		} else {
