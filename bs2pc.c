@@ -308,10 +308,6 @@ static void BS2PC_PreProcessTextureLump() {
 
 		width = textureGbx->width;
 		height = textureGbx->height;
-		if (width == 0 || height == 0 || (width & 15) != 0 || (height & 15) != 0) {
-			fprintf(stderr, "Texture %s has non-16-aligned width or height.\n", textureName);
-			exit(EXIT_FAILURE);
-		}
 		texture_lump_size += width * height +
 				(width >> 1) * (height >> 1) +
 				(width >> 2) * (height >> 2) +
@@ -483,7 +479,7 @@ static void BS2PC_AllocateIDBSP() {
 
 	headerId.lumps[LUMP_ID_TEXTURES].fileofs = bspSize;
 	headerId.lumps[LUMP_ID_TEXTURES].filelen = texture_lump_size;
-	bspSize += headerId.lumps[LUMP_ID_TEXTURES].filelen;
+	bspSize += (headerId.lumps[LUMP_ID_TEXTURES].filelen + 3) & ~3;
 
 	bspfile_size_id = bspSize;
 	bspfile_id = (unsigned char *) calloc(1, bspfile_size_id);
