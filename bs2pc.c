@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+#include "bs2pc.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,10 +32,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define strncasecmp _strnicmp
 #else
 #include <alloca.h>
-#endif
-#include "zlib.h"
-#ifdef _WIN32
-#include <Windows.h>
 #endif
 
 /*************
@@ -262,6 +259,7 @@ typedef struct {
  *********/
 
 static unsigned char *bspfile_gbx;
+static unsigned int bspfile_size_gbx;
 static const dheader_gbx_t *header_gbx;
 
 inline unsigned int BS2PC_GbxOffsetToIndex(bspoffset_t offset, unsigned int lump, unsigned int lumpSize) {
@@ -294,11 +292,7 @@ static void BS2PC_PreProcessTextureLump() {
 
 	// The first texture's bytes follow the last texture info.
 	texture_count = (textureGbx->offset - header_gbx->lumpofs[LUMP_GBX_TEXTURES]) / sizeof(dmiptex_gbx_t);
-	textures_special = calloc(texture_count, sizeof(bool));
-	if (textures_special == NULL) {
-		fputs("Couldn't allocate special texture flags.\n", stderr);
-		exit(EXIT_FAILURE);
-	}
+	textures_special = BS2PC_Alloc(texture_count * sizeof(bool), true);
 
 	texture_lump_size = sizeof(unsigned int) /* texture count */ +
 			texture_count * (sizeof(bspoffset_t) /* offset */ + sizeof(dmiptex_id_t) + (2 + 768 + 2));
@@ -340,16 +334,11 @@ static void BS2PC_InitializeNodraw() {
 		return;
 	}
 
-	nodraw_face_map = (unsigned int *) malloc(faceCount * sizeof(unsigned int));
+	nodraw_face_map = (unsigned int *) BS2PC_Alloc(faceCount * sizeof(unsigned int), false);
 	nodraw_face_count = 0;
-	nodraw_marksurface_map = (dmarksurface_gbx_t *) malloc(marksurfaceCount * sizeof(dmarksurface_gbx_t));
+	nodraw_marksurface_map = (dmarksurface_gbx_t *) BS2PC_Alloc(marksurfaceCount * sizeof(dmarksurface_gbx_t), false);
 	nodraw_marksurface_count = 0;
-	nodraw_marksurface_lump_id = (dmarksurface_id_t *) malloc(marksurfaceCount * sizeof(dmarksurface_id_t));
-
-	if (nodraw_face_map == NULL || nodraw_marksurface_map == NULL || nodraw_marksurface_lump_id == NULL) {
-		fputs("Couldn't allocate non-nodraw face and marksurface maps.\n", stderr);
-		exit(EXIT_FAILURE);
-	}
+	nodraw_marksurface_lump_id = (dmarksurface_id_t *) BS2PC_Alloc(marksurfaceCount * sizeof(dmarksurface_id_t), false);
 
 	faces = (const dface_gbx_t *) (bspfile_gbx + header_gbx->lumpofs[LUMP_GBX_FACES]);
 
@@ -494,7 +483,7 @@ static void BS2PC_AllocateIdBSP() {
 	bspSize += (headerId.lumps[LUMP_ID_TEXTURES].filelen + 3) & ~3;
 
 	bspfile_size_id = bspSize;
-	bspfile_id = (unsigned char *) calloc(1, bspfile_size_id);
+	bspfile_id = (unsigned char *) BS2PC_Alloc(bspfile_size_id, true);
 	if (bspfile_id == NULL) {
 		fputs("Couldn't allocate the .bsp file contents.\n", stderr);
 		exit(EXIT_FAILURE);
@@ -934,46 +923,9 @@ void BS2PC_ConvertTexturesToId() {
 	}
 }
 
-#ifdef _WIN32
-#define BS2PC_ZLIB_IMPORT WINAPI
-#else
-#define BS2PC_ZLIB_IMPORT
-#endif
-typedef int (BS2PC_ZLIB_IMPORT *qinflateInit__t)(z_streamp strm, const char *version, int stream_size);
-static qinflateInit__t qinflateInit_;
-typedef int (BS2PC_ZLIB_IMPORT *qinflate_t)(z_streamp strm, int flush);
-static qinflate_t qinflate;
-typedef int (BS2PC_ZLIB_IMPORT *qinflateEnd_t)(z_streamp strm);
-static qinflateEnd_t qinflateEnd;
-
-void BS2PC_InitializeZlib() {
-	#ifdef _WIN32
-	HMODULE module;
-	module = LoadLibrary(TEXT("zlibwapi.dll"));
-	if (module == NULL) {
-		fputs("Couldn't open zlibwapi.dll.\n", stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	qinflateInit_ = (qinflateInit__t) GetProcAddress(module, "inflateInit_");
-	qinflate = (qinflate_t) GetProcAddress(module, "inflate");
-	qinflateEnd = (qinflateEnd_t) GetProcAddress(module, "inflateEnd");
-	#else
-	#error No zlib loading code for this platform.
-	#endif
-
-	if (qinflateInit_ == NULL || qinflate == NULL || qinflateEnd == NULL) {
-		fputs("Couldn't get a zlib function.\n", stderr);
-		exit(EXIT_FAILURE);
-	}
-}
-
 int main(int argc, const char **argv) {
-	FILE *bs2File, *idFile;
+	unsigned char *bs2File;
 	long bs2FileSize;
-	unsigned char *bs2FileContents;
-	unsigned int gbxFileSize;
-	z_stream stream;
 	size_t fileNameLength;
 	char *idFileName;
 
@@ -983,65 +935,18 @@ int main(int argc, const char **argv) {
 		return EXIT_SUCCESS;
 	}
 
-	fputs("Initializing zlib...\n", stderr);
-	BS2PC_InitializeZlib();
-
 	fputs("Loading the .bs2 file...\n", stderr);
-
-	bs2File = fopen(argv[1], "rb");
-	if (bs2File == NULL) {
-		fputs("Couldn't open the .bs2 file.\n", stderr);
+	bs2File = (unsigned char *) BS2PC_LoadFile(argv[1], &bs2FileSize);
+	if (bs2FileSize <= sizeof(unsigned int)) {
+		fputs(".bs2 file size is invalid.\n", stderr);
 		return EXIT_FAILURE;
 	}
-
-	fseek(bs2File, 0, SEEK_END);
-	bs2FileSize = ftell(bs2File);
-	if (bs2FileSize <= 4) {
-		fputs("Couldn't get the .bs2 file size or it's invalid.\n", stderr);
-		return EXIT_FAILURE;
-	}
-	rewind(bs2File);
-
-	bs2FileContents = (unsigned char *) malloc(bs2FileSize);
-	if (bs2FileContents == NULL) {
-		fputs("Couldn't allocate the .bs2 file contents.\n", stderr);
-		return EXIT_FAILURE;
-	}
-
-	if (fread(bs2FileContents, bs2FileSize, 1, bs2File) == 0) {
-		fputs("Couldn't read the .bs2 file.\n", stderr);
-		return EXIT_FAILURE;
-	}
-
-	fclose(bs2File);
 
 	fputs("Decompressing .bs2...\n", stderr);
-
-	gbxFileSize = *((unsigned int *) bs2FileContents);
-	bspfile_gbx = (unsigned char *) malloc(gbxFileSize);
-	if (bspfile_gbx == NULL) {
-		fputs("Couldn't allocate the uncompressed .bs2 file contents.\n", stderr);
-		return EXIT_FAILURE;
-	}
-
-	stream.zalloc = Z_NULL;
-	stream.zfree = Z_NULL;
-	stream.opaque = Z_NULL;
-	stream.avail_in = bs2FileSize - sizeof(unsigned int);
-	stream.next_in = (Bytef *) (bs2FileContents + sizeof(unsigned int));
-	stream.avail_out = gbxFileSize;
-	stream.next_out = (Bytef *) bspfile_gbx;
-	if (qinflateInit_(&stream, ZLIB_VERSION, sizeof(stream)) != Z_OK) {
-		fputs("Couldn't initialize decompression.\n", stderr);
-		return EXIT_FAILURE;
-	}
-	if (qinflate(&stream, Z_NO_FLUSH) != Z_STREAM_END) {
-		fputs("Couldn't decompress the map.\n", stderr);
-		return EXIT_FAILURE;
-	}
-	qinflateEnd(&stream);
-
-	free(bs2FileContents);
+	bspfile_size_gbx = *((unsigned int *) bs2File);
+	bspfile_gbx = (unsigned char *) BS2PC_Alloc(bspfile_size_gbx, false);
+	BS2PC_Decompress(bs2File + sizeof(unsigned int), bs2FileSize - sizeof(unsigned int), bspfile_gbx, bspfile_size_gbx);
+	BS2PC_Free(bs2File);
 
 	header_gbx = (const dheader_gbx_t *) bspfile_gbx;
 	if (header_gbx->version != BSPVERSION_GBX) {
@@ -1097,18 +1002,7 @@ int main(int argc, const char **argv) {
 		strcpy(idFileName + fileNameLength, ".bsp");
 	}
 
-	idFile = fopen(idFileName, "wb");
-	if (idFile == NULL) {
-		fputs("Couldn't open the .bsp file.\n", stderr);
-		return EXIT_FAILURE;
-	}
-
-	if (fwrite(bspfile_id, bspfile_size_id, 1, idFile) == 0) {
-		fputs("Couldn't write the .bsp file.\n", stderr);
-		return EXIT_FAILURE;
-	}
-
-	fclose(idFile);
+	BS2PC_WriteFile(idFileName, bspfile_id, bspfile_size_id);
 
 	fprintf(stderr, "%s converted.\n", argv[1]);
 
