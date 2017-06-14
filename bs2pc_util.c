@@ -19,6 +19,13 @@ void *BS2PC_Alloc(size_t size, bool zeroed) {
 	return memory;
 }
 
+void BS2PC_AllocReplace(void **memory, size_t size, bool zeroed) {
+	if (*memory != NULL) {
+		BS2PC_Free(*memory);
+	}
+	*memory = BS2PC_Alloc(size, zeroed);
+}
+
 void *BS2PC_LoadFile(const char *fileName, unsigned int *fileSize) {
 	FILE *file;
 	long fileEnd;
@@ -144,4 +151,30 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 		exit(EXIT_FAILURE);
 	}
 	bs2pc_zlib_inflateEnd(&stream);
+}
+
+// GL_Resample8BitTexture from Quake.
+void BS2PC_ResampleTexture(unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight)
+{
+	int i, j;
+	unsigned char *inrow;
+	unsigned frac, fracstep;
+
+	fracstep = inwidth * 0x10000 / outwidth;
+	for (i = 0; i < outheight; ++i, out += outwidth)
+	{
+		inrow = in + inwidth * (i * inheight / outheight);
+		frac = fracstep >> 1;
+		for (j = 0; j < outwidth; j += 4)
+		{
+			out[j] = inrow[frac >> 16];
+			frac += fracstep;
+			out[j + 1] = inrow[frac >> 16];
+			frac += fracstep;
+			out[j + 2] = inrow[frac >> 16];
+			frac += fracstep;
+			out[j + 3] = inrow[frac >> 16];
+			frac += fracstep;
+		}
+	}
 }

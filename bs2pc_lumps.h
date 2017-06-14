@@ -62,6 +62,8 @@ typedef struct {
 	unsigned int version;
 	bspoffset_t lumpofs[LUMP_GBX_COUNT];
 	unsigned int lumplen[LUMP_GBX_COUNT];
+	unsigned int lumpnum[LUMP_GBX_COUNT];
+	unsigned int unknown[LUMP_GBX_COUNT]; // Zeros?
 } dheader_gbx_t;
 
 typedef struct {
