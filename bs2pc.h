@@ -62,3 +62,9 @@ inline bspoffset_t BS2PC_GbxIndexToOffset(unsigned int index, unsigned int lump,
 // Conversion
 
 void BS2PC_ConvertGbxToId();
+
+// WAD texture management
+
+void BS2PC_SetWadDirectory(const char *directory);
+void BS2PC_LoadWadsFromEntities(const char *entities, unsigned int entitiesSize);
+unsigned char *BS2PC_LoadTexture(const char *name);
