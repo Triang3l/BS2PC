@@ -17,4 +17,4 @@ Half-Life on PS2 uses DEFLATE compression for its maps and stores its internal s
 
 On the PC maps after playing the PS2 ones or vice versa, some textures may look different (from minor power of 2 scaling artifacts to completely different images) as the textures have common names. If you want to switch between the two versions, restart the game so everything looks correct.
 
-Licensed under GPLv2 (except for zlib) as it's derived from the Quake engine source.
+Licensed under GPLv2 (except for zlib) as it's derived from the Quake engine source, but not enforced - the format research results can be considered being in the public domain.
