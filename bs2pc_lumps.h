@@ -153,12 +153,20 @@ typedef struct {
 	unsigned int lightofs;
 } dface_id_t;
 
+#define SURF_PLANEBACK 0x2
+#define SURF_DRAWSKY 0x4
+#define SURF_DRAWTURB 0x10
+#define SURF_DRAWTILED 0x20
+#define SURF_NODRAW 0x100
+#define SURF_SPECIAL 0x200 // All SURF_DRAWTILED except for scrolltoxic.
+#define SURF_HASPOLYS 0x400 // Turbulent or translucent.
+
 typedef struct {
 	float vecs[2][4];
 	unsigned short side;
-	unsigned char unknown1[2];
+	unsigned short flags;
 	bspoffset_t miptex;
-	bspoffset_t lightofs;
+	bspoffset_t lightofs; // UINT_MAX for aaatrigger and sky.
 	bspoffset_t plane;
 	unsigned char unknown2[4];
 	unsigned int firstedge;
