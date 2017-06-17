@@ -1,4 +1,5 @@
 #include "bs2pc.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,7 +11,6 @@ unsigned int bs2pc_idMapSize, bs2pc_gbxMapSize;
 
 static unsigned int bs2pc_idTextureLumpSize;
 static bool *bs2pc_gbxTexturesSpecial = NULL; // Whether textures are special - texinfo needs this.
-static unsigned int bs2pc_gbxTextureNodraw = UINT_MAX;
 
 static void BS2PC_ProcessGbxTextureLump() {
 	const dmiptex_gbx_t *textureGbx = (const dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
@@ -21,18 +21,16 @@ static void BS2PC_ProcessGbxTextureLump() {
 	bs2pc_idTextureLumpSize = sizeof(unsigned int) /* texture count */ +
 			textureCount * (sizeof(bspoffset_t) /* offset */ + sizeof(dmiptex_id_t) + (2 + 768 + 2));
 
-	bs2pc_gbxTextureNodraw = UINT_MAX;
 	for (textureIndex = 0; textureIndex < textureCount; ++textureIndex) {
 		const char *textureName = textureGbx->name;
 		unsigned int width, height;
 
-		if (bs2pc_gbxTextureNodraw == UINT_MAX && bs2pc_strncasecmp(textureName, "nodraw", 6) == 0) {
-			bs2pc_gbxTextureNodraw = textureIndex;
-		} else if (textureName[0] == '*' ||
+		if (textureName[0] == '*' ||
 				bs2pc_strncasecmp(textureName, "sky", 3) == 0 ||
 				bs2pc_strncasecmp(textureName, "clip", 4) == 0 ||
 				bs2pc_strncasecmp(textureName, "origin", 6) == 0 ||
-				bs2pc_strncasecmp(textureName, "aaatrigger", 10) == 0) {
+				bs2pc_strncasecmp(textureName, "aaatrigger", 10) == 0 ||
+				bs2pc_strncasecmp(textureName, "nodraw", 6) == 0) {
 			bs2pc_gbxTexturesSpecial[textureIndex] = true;
 		}
 
@@ -60,10 +58,6 @@ static void BS2PC_BuildGbxNodrawSkippingInfo() {
 	const dface_gbx_t *faces, *face;
 	const dmarksurface_gbx_t *marksurface;
 
-	if (bs2pc_gbxTextureNodraw == UINT_MAX) {
-		return;
-	}
-
 	BS2PC_AllocReplace(&bs2pc_nodrawFaceMap, faceCount * sizeof(unsigned int), false);
 	bs2pc_faceCountWithoutNodraw = 0;
 	BS2PC_AllocReplace(&bs2pc_nodrawMarksurfaceMap, marksurfaceCount * sizeof(unsigned int), false);
@@ -74,7 +68,7 @@ static void BS2PC_BuildGbxNodrawSkippingInfo() {
 
 	for (faceIndex = 0, face = faces; faceIndex < faceCount; ++faceIndex, ++face) {
 		bs2pc_nodrawFaceMap[faceIndex] = bs2pc_faceCountWithoutNodraw;
-		if (BS2PC_GbxOffsetToIndex(face->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != bs2pc_gbxTextureNodraw) {
+		if (!(face->flags & SURF_NODRAW)) {
 			++bs2pc_faceCountWithoutNodraw;
 		}
 	}
@@ -82,51 +76,32 @@ static void BS2PC_BuildGbxNodrawSkippingInfo() {
 	marksurface = (const dmarksurface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_MARKSURFACES);
 	for (marksurfaceIndex = 0; marksurfaceIndex < marksurfaceCount; ++marksurfaceIndex, ++marksurface) {
 		bs2pc_nodrawMarksurfaceMap[marksurfaceIndex] = bs2pc_marksurfaceCountWithoutNodraw;
-		if (BS2PC_GbxOffsetToIndex(faces[*marksurface].miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != bs2pc_gbxTextureNodraw) {
+		if (!(faces[*marksurface].flags & SURF_NODRAW)) {
 			bs2pc_idMarksurfaceLumpWithoutNodraw[bs2pc_marksurfaceCountWithoutNodraw] = (unsigned short) bs2pc_nodrawFaceMap[*marksurface];
 			++bs2pc_marksurfaceCountWithoutNodraw;
 		}
 	}
 }
 
-static void BS2PC_SkipNodrawInFaceRange(unsigned int inFirst, unsigned int inCount, unsigned int *outFirst, unsigned int *outCount) {
-	unsigned int index, count;
-	const dface_gbx_t *gbxFace;
-
-	if (bs2pc_gbxTextureNodraw == UINT_MAX) {
-		*outFirst = inFirst;
-		*outCount = inCount;
-		return;
-	}
-
+static void BS2PC_SkipNodrawInGbxFaceRange(unsigned int inFirst, unsigned int inCount, unsigned int *outFirst, unsigned int *outCount) {
+	unsigned int index, count = 0;
+	const dface_gbx_t *face = (const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES) + inFirst;
 	*outFirst = bs2pc_nodrawFaceMap[inFirst];
-	count = 0;
-	gbxFace = (const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES) + inFirst;
-	for (index = 0; index < inCount; ++index, ++gbxFace) {
-		if (BS2PC_GbxOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != bs2pc_gbxTextureNodraw) {
+	for (index = 0; index < inCount; ++index, ++face) {
+		if (!(face->flags & SURF_NODRAW)) {
 			++count;
 		}
 	}
 	*outCount = count;
 }
 
-static void BS2PC_SkipNodrawInMarksurfaceRange(unsigned int inFirst, unsigned int inCount, unsigned int *outFirst, unsigned int *outCount) {
-	unsigned int index, count;
-	const dmarksurface_gbx_t *gbxMarksurface;
-	const dface_gbx_t *gbxFace;
-
-	if (bs2pc_gbxTextureNodraw == UINT_MAX) {
-		*outFirst = inFirst;
-		*outCount = inCount;
-		return;
-	}
-
+static void BS2PC_SkipNodrawInGbxMarksurfaceRange(unsigned int inFirst, unsigned int inCount, unsigned int *outFirst, unsigned int *outCount) {
+	unsigned int index, count = 0;
+	const dmarksurface_gbx_t *marksurface = (const dmarksurface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_MARKSURFACES) + inFirst;
+	const dface_gbx_t *faces = (const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES);
 	*outFirst = bs2pc_nodrawMarksurfaceMap[inFirst];
-	count = 0;
-	gbxMarksurface = (const dmarksurface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_MARKSURFACES) + inFirst;
-	for (index = 0; index < inCount; ++index, ++gbxMarksurface) {
-		gbxFace = (const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES) + *gbxMarksurface;
-		if (BS2PC_GbxOffsetToIndex(gbxFace->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) != bs2pc_gbxTextureNodraw) {
+	for (index = 0; index < inCount; ++index, ++marksurface) {
+		if (!(faces[*marksurface].flags & SURF_NODRAW)) {
 			++count;
 		}
 	}
@@ -145,18 +120,9 @@ static void BS2PC_PreProcessGbxMap() {
 static void BS2PC_AllocateIdMapFromGbx() {
 	dheader_id_t headerId;
 	unsigned int bspSize;
-	unsigned int faceCount, marksurfaceCount;
 
 	headerId.version = BSPVERSION_ID;
 	bspSize = (sizeof(dheader_id_t) + 3) & ~3;
-
-	if (bs2pc_gbxTextureNodraw != UINT_MAX) {
-		faceCount = bs2pc_faceCountWithoutNodraw;
-		marksurfaceCount = bs2pc_marksurfaceCountWithoutNodraw;
-	} else {
-		faceCount = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
-		marksurfaceCount = BS2PC_GbxLumpCount(LUMP_GBX_MARKSURFACES);
-	}
 
 	headerId.lumps[LUMP_ID_PLANES].fileofs = bspSize;
 	headerId.lumps[LUMP_ID_PLANES].filelen = BS2PC_GbxLumpCount(LUMP_GBX_PLANES) * sizeof(dplane_id_t);
@@ -175,11 +141,11 @@ static void BS2PC_AllocateIdMapFromGbx() {
 	bspSize += (headerId.lumps[LUMP_ID_NODES].filelen + 3) & ~3;
 
 	headerId.lumps[LUMP_ID_TEXINFO].fileofs = bspSize;
-	headerId.lumps[LUMP_ID_TEXINFO].filelen = faceCount * sizeof(dtexinfo_id_t);
+	headerId.lumps[LUMP_ID_TEXINFO].filelen = bs2pc_faceCountWithoutNodraw * sizeof(dtexinfo_id_t);
 	bspSize += (headerId.lumps[LUMP_ID_TEXINFO].filelen + 3) & ~3;
 
 	headerId.lumps[LUMP_ID_FACES].fileofs = bspSize;
-	headerId.lumps[LUMP_ID_FACES].filelen = faceCount * sizeof(dface_id_t);
+	headerId.lumps[LUMP_ID_FACES].filelen = bs2pc_faceCountWithoutNodraw * sizeof(dface_id_t);
 	bspSize += (headerId.lumps[LUMP_ID_FACES].filelen + 3) & ~3;
 
 	headerId.lumps[LUMP_ID_CLIPNODES].fileofs = bspSize;
@@ -187,7 +153,7 @@ static void BS2PC_AllocateIdMapFromGbx() {
 	bspSize += (headerId.lumps[LUMP_ID_CLIPNODES].filelen + 3) & ~3;
 
 	headerId.lumps[LUMP_ID_MARKSURFACES].fileofs = bspSize;
-	headerId.lumps[LUMP_ID_MARKSURFACES].filelen = marksurfaceCount * sizeof(dmarksurface_id_t);
+	headerId.lumps[LUMP_ID_MARKSURFACES].filelen = bs2pc_marksurfaceCountWithoutNodraw * sizeof(dmarksurface_id_t);
 	bspSize += (headerId.lumps[LUMP_ID_MARKSURFACES].filelen + 3) & ~3;
 
 	headerId.lumps[LUMP_ID_SURFEDGES].fileofs = bspSize;
@@ -273,7 +239,7 @@ static void BS2PC_ConvertLeafsToId() {
 		id->maxs[1] = (short) gbx->maxs[1];
 		id->maxs[2] = (short) gbx->maxs[2];
 		id->visofs = gbx->visofs - (gbx->visofs != UINT_MAX ? BS2PC_GbxLumpOffset(LUMP_GBX_VISIBILITY) : 0);
-		BS2PC_SkipNodrawInMarksurfaceRange(gbx->firstmarksurface, gbx->nummarksurfaces, &firstMarksurface, &marksurfaceCount);
+		BS2PC_SkipNodrawInGbxMarksurfaceRange(gbx->firstmarksurface, gbx->nummarksurfaces, &firstMarksurface, &marksurfaceCount);
 		id->firstmarksurface = (unsigned short) firstMarksurface;
 		id->nummarksurfaces = (unsigned short) marksurfaceCount;
 		memcpy(id->ambient_level, gbx->ambient_level, sizeof(id->ambient_level));
@@ -353,7 +319,7 @@ static void BS2PC_ConvertNodesToId() {
 		id->maxs[0] = (short) gbx->maxs[0];
 		id->maxs[1] = (short) gbx->maxs[1];
 		id->maxs[2] = (short) gbx->maxs[2];
-		BS2PC_SkipNodrawInFaceRange(gbx->firstface, gbx->numfaces, &firstFace, &faceCount);
+		BS2PC_SkipNodrawInGbxFaceRange(gbx->firstface, gbx->numfaces, &firstFace, &faceCount);
 		id->firstface = (unsigned short) firstFace;
 		id->numfaces = (unsigned short) faceCount;
 	}
@@ -364,13 +330,12 @@ static void BS2PC_ConvertTexinfoToId() {
 	dtexinfo_id_t *id = (dtexinfo_id_t *) BS2PC_IdLump(LUMP_ID_TEXINFO);
 	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
 	for (index = 0; index < count; ++index, ++gbx) {
-		unsigned int miptex = BS2PC_GbxOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
-		if (bs2pc_gbxTextureNodraw != UINT_MAX && miptex == bs2pc_gbxTextureNodraw) {
+		if (gbx->flags & SURF_NODRAW) {
 			continue;
 		}
 		memcpy(id->vecs, gbx->vecs, sizeof(id->vecs));
-		id->miptex = miptex;
-		id->flags = (bs2pc_gbxTexturesSpecial[miptex] ? TEX_SPECIAL : 0);
+		id->miptex = BS2PC_GbxOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
+		id->flags = (bs2pc_gbxTexturesSpecial[id->miptex] ? TEX_SPECIAL : 0);
 		++id;
 	}
 }
@@ -381,7 +346,7 @@ static void BS2PC_ConvertFacesToId() {
 	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
 	unsigned int idIndex = 0;
 	for (index = 0; index < count; ++index, ++gbx) {
-		if (bs2pc_gbxTextureNodraw != UINT_MAX && BS2PC_GbxOffsetToIndex(gbx->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) == bs2pc_gbxTextureNodraw) {
+		if (gbx->flags & SURF_NODRAW) {
 			continue;
 		}
 		id->planenum = (unsigned short) BS2PC_GbxOffsetToIndex(gbx->plane, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
@@ -397,20 +362,8 @@ static void BS2PC_ConvertFacesToId() {
 }
 
 static void BS2PC_ConvertMarksurfacesToId() {
-	const dmarksurface_gbx_t *gbx;
-	dmarksurface_id_t *id = (dmarksurface_id_t *) BS2PC_IdLump(LUMP_ID_MARKSURFACES);
-	unsigned int index, count;
-
-	if (bs2pc_gbxTextureNodraw != UINT_MAX) {
-		memcpy(id, bs2pc_idMarksurfaceLumpWithoutNodraw, bs2pc_marksurfaceCountWithoutNodraw * sizeof(dmarksurface_id_t));
-		return;
-	}
-
-	gbx = (const dmarksurface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_MARKSURFACES);
-	count = BS2PC_GbxLumpCount(LUMP_GBX_MARKSURFACES);
-	for (index = 0; index < count; ++index, ++id) {
-		*id = (dmarksurface_id_t) gbx[index];
-	}
+	memcpy(BS2PC_IdLump(LUMP_ID_MARKSURFACES), bs2pc_idMarksurfaceLumpWithoutNodraw,
+			bs2pc_marksurfaceCountWithoutNodraw * sizeof(dmarksurface_id_t));
 }
 
 static void BS2PC_ConvertMarksurfacesToGbx() {
@@ -432,7 +385,7 @@ static void BS2PC_ConvertModelsToId() {
 		memcpy(id->origin, gbx->origin, 3 * sizeof(float));
 		memcpy(id->headnode, gbx->headnode, sizeof(id->headnode));
 		id->visleafs = gbx->visleafs;
-		BS2PC_SkipNodrawInFaceRange(gbx->firstface, gbx->numfaces, &id->firstface, &id->numfaces);
+		BS2PC_SkipNodrawInGbxFaceRange(gbx->firstface, gbx->numfaces, &id->firstface, &id->numfaces);
 	}
 }
 
