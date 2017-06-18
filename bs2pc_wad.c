@@ -56,12 +56,12 @@ static void BS2PC_LoadWad(const char *fileName /* Assuming / slash */) {
 	file = fopen(fileName, "rb");
 	if (file == NULL && bs2pc_wadDirectory != NULL) {
 		const char *fileNameRelative = strrchr(fileName, '/');
-		if (fileNameRelative != NULL) {
-			fileNameWithGame = alloca(bs2pc_wadDirectoryLength + strlen(fileNameRelative) + 1);
-			strcpy(fileNameWithGame, bs2pc_wadDirectory);
-			strcpy(fileNameWithGame + bs2pc_wadDirectoryLength, fileNameRelative);
-			file = fopen(fileNameWithGame, "rb");
-		}
+		fileNameRelative = (fileNameRelative != NULL ? fileNameRelative + 1 : fileName);
+		fileNameWithGame = bs2pc_alloca(bs2pc_wadDirectoryLength + 1 + strlen(fileNameRelative) + 1);
+		strcpy(fileNameWithGame, bs2pc_wadDirectory);
+		fileNameWithGame[bs2pc_wadDirectoryLength] = '/';
+		strcpy(fileNameWithGame + bs2pc_wadDirectoryLength + 1, fileNameRelative);
+		file = fopen(fileNameWithGame, "rb");
 	}
 
 	if (file == NULL) {
