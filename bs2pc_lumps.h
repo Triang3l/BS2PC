@@ -141,6 +141,10 @@ typedef struct {
 	unsigned int flags;
 } dtexinfo_id_t;
 
+typedef struct {
+	unsigned short v[2];
+} dedge_t;
+
 #define MAX_LIGHTMAPS 4
 
 typedef struct {

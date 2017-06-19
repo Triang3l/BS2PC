@@ -31,7 +31,7 @@ int main(int argc, const char **argv) {
 	size_t targetFileNameLength;
 	char *targetFileName;
 
-	fputs("BS2PC build 3 - Half-Life PlayStation 2 to PC map converter.\n", stderr);
+	fputs("BS2PC build 3 - Half-Life PlayStation 2 map converter.\n", stderr);
 	if (argc < 2) {
 		fputs("Specify the .bs2 or .bsp file path and, for .bsp to .bs2, optionally `-game path_to_WADs` when launching.\n", stderr);
 		return EXIT_SUCCESS;
@@ -50,7 +50,21 @@ int main(int argc, const char **argv) {
 		bs2pc_idMapSize = sourceFileSize;
 		bs2pc_idMap = sourceFile;
 
+		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision, compression and WAD directory are missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
 		BS2PC_ConvertIdToGbx();
+
+		fputs("Writing the .bs2 file...\n", stderr);
+		targetFileNameLength = strlen(argv[1]);
+		targetFileName = bs2pc_alloca(targetFileNameLength + 5);
+		strcpy(targetFileName, argv[1]);
+		if (targetFileNameLength >= 4 && bs2pc_strcasecmp(targetFileName + targetFileNameLength - 4, ".bsp") == 0) {
+			targetFileName[targetFileNameLength - 1] = '2';
+		} else {
+			strcpy(targetFileName + targetFileNameLength, ".bs2");
+		}
+		BS2PC_WriteFile(targetFileName, bs2pc_gbxMap, bs2pc_gbxMapSize);
+
+		fprintf(stderr, "%s converted to %s.\n", argv[1], targetFileName);
 	} else {
 		if (beginning != BSPVERSION_GBX) {
 			fputs("Decompressing .bs2...\n", stderr);
