@@ -154,10 +154,10 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 }
 
 // GL_Resample8BitTexture from Quake.
-void BS2PC_ResampleTexture(unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight)
+void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight)
 {
 	int i, j;
-	unsigned char *inrow;
+	const unsigned char *inrow;
 	unsigned frac, fracstep;
 
 	fracstep = inwidth * 0x10000 / outwidth;

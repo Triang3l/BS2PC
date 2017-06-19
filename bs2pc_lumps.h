@@ -125,7 +125,7 @@ typedef struct {
 	float mins[4], maxs[4];
 	bspoffset_t children[2];
 	unsigned short firstface, numfaces;
-	unsigned char unknown1[4];
+	unsigned int unknown1;
 } dnode_gbx_t;
 
 typedef struct {
@@ -195,7 +195,7 @@ typedef struct {
 	int contents;
 	bspoffset_t parent;
 	unsigned int visframe;
-	unsigned char unknown1[4];
+	unsigned int unknown1;
 	float mins[4], maxs[4];
 	bspoffset_t visofs;
 	unsigned int firstmarksurface, nummarksurfaces;

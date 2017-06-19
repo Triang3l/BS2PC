@@ -167,7 +167,7 @@ static int BS2PC_WadSearchComparison(const void *keyLump, const void *lump) {
 static unsigned char *bs2pc_wadLumpBuffer = NULL;
 static unsigned int bs2pc_wadLumpBufferSize = 0;
 
-unsigned char *BS2PC_LoadTexture(const char *name) {
+unsigned char *BS2PC_LoadTextureFromWad(const char *name) {
 	const bs2pc_wad_t *wad;
 	bs2pc_wadLumpInfo_t keyLumpInfo;
 	const bs2pc_wadLumpInfo_t *lumpInfo = NULL;

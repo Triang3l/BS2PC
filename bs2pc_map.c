@@ -44,6 +44,22 @@ static void BS2PC_ProcessGbxTextureLump() {
 	}
 }
 
+static unsigned int BS2PC_TextureDimensionToGbx(unsigned int npot) {
+	if (npot < 24) {
+		return 16;
+	}
+	if (npot < 48) {
+		return 32;
+	}
+	if (npot < 96) {
+		return 64;
+	}
+	if (npot < 192) {
+		return 128;
+	}
+	return 256;
+}
+
 typedef struct {
 	unsigned int faceFlags;
 	unsigned int animTotal, animNext, alternateAnims;
@@ -51,6 +67,7 @@ typedef struct {
 
 static bs2pc_idTextureAdditionalInfo_t *bs2pc_idTextureAdditionalInfo = NULL;
 static unsigned int bs2pc_idAnimatedStart = UINT_MAX, bs2pc_idAnimatedCount = 0;
+static unsigned int bs2pc_gbxTextureDataSize;
 
 static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsigned char frame) {
 	char name[16];
@@ -75,7 +92,6 @@ static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsign
 	high = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount - 1;
 	while (low <= high) {
 		mid = low + ((high - low) >> 1);
-
 		difference = bs2pc_strncasecmp(((const dmiptex_id_t *) (lump + offsets[mid]))->name, name, 15);
 		if (difference == 0) {
 			return mid;
@@ -98,11 +114,13 @@ static void BS2PC_ProcessIdTextureLump() {
 	BS2PC_AllocReplace(&bs2pc_idTextureAdditionalInfo, count * sizeof(bs2pc_idTextureAdditionalInfo_t), false);
 	bs2pc_idAnimatedStart = UINT_MAX;
 	bs2pc_idAnimatedCount = 0;
+	bs2pc_gbxTextureDataSize = 0;
 
 	for (index = 0; index < count; ++index) {
 		const dmiptex_id_t *texture = (const dmiptex_id_t *) (lump + offsets[index]);
 		const char *name = texture->name;
 		bs2pc_idTextureAdditionalInfo_t *info = &bs2pc_idTextureAdditionalInfo[index];
+		unsigned int scaledWidth, scaledHeight;
 
 		unsigned int flags = 0;
 		if (name[0] == '+') {
@@ -110,7 +128,7 @@ static void BS2PC_ProcessIdTextureLump() {
 				bs2pc_idAnimatedStart = index;
 			}
 			++bs2pc_idAnimatedCount;
-		} else if (name[0] == '!' || bs2pc_strncasecmp(name, "water", 5) == 0) {
+		} else if (name[0] == '!' || name[0] == '*' || bs2pc_strncasecmp(name, "water", 5) == 0) {
 			flags = SURF_DRAWTURB | SURF_DRAWTILED | SURF_SPECIAL | SURF_HASPOLYS;
 		} else if (name[0] == '{') {
 			flags = SURF_HASPOLYS;
@@ -128,6 +146,17 @@ static void BS2PC_ProcessIdTextureLump() {
 		info->animTotal = 0;
 		info->animNext = UINT_MAX;
 		info->alternateAnims = UINT_MAX;
+
+		scaledWidth = BS2PC_TextureDimensionToGbx(texture->width);
+		scaledHeight = BS2PC_TextureDimensionToGbx(texture->height);
+		while (true) {
+			bs2pc_gbxTextureDataSize += scaledWidth * scaledHeight;
+			if (scaledWidth <= 8 || scaledHeight <= 8) {
+				break;
+			}
+			scaledWidth >>= 1;
+			scaledHeight >>= 1;
+		}
 	}
 
 	if (bs2pc_idAnimatedCount != 0) {
@@ -386,6 +415,30 @@ static void BS2PC_ConvertLeafsToId() {
 	}
 }
 
+static void BS2PC_ConvertLeafsToGbx() {
+	const dleaf_id_t *id = (const dleaf_id_t *) BS2PC_IdLump(LUMP_ID_LEAFS);
+	dleaf_gbx_t *gbx = (dleaf_gbx_t *) BS2PC_GbxLump(LUMP_GBX_LEAFS);
+	unsigned int index, count = BS2PC_IdLumpSize(LUMP_ID_LEAFS) / sizeof(dleaf_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx) {
+		gbx->contents = id->contents;
+		// Parent set by ConvertNodesToGbx.
+		gbx->visframe = 0;
+		gbx->unknown1 = 0;
+		gbx->mins[0] = (float) id->mins[0];
+		gbx->mins[1] = (float) id->mins[1];
+		gbx->mins[2] = (float) id->mins[2];
+		gbx->mins[3] = 0.0f;
+		gbx->maxs[0] = (float) id->maxs[0];
+		gbx->maxs[1] = (float) id->maxs[1];
+		gbx->maxs[2] = (float) id->maxs[2];
+		gbx->maxs[3] = 0.0f;
+		gbx->visofs = id->visofs + (id->visofs != UINT_MAX ? BS2PC_GbxLumpOffset(LUMP_GBX_VISIBILITY) : 0);
+		gbx->firstmarksurface = (unsigned short) id->firstmarksurface;
+		gbx->nummarksurfaces = (unsigned short) id->nummarksurfaces;
+		memcpy(gbx->ambient_level, id->ambient_level, sizeof(gbx->ambient_level));
+	}
+}
+
 static void BS2PC_MakeGbxHull0() {
 	const dnode_id_t *id = (const dnode_id_t *) BS2PC_IdLump(LUMP_ID_NODES);
 	const dleaf_id_t *idLeafs = (const dleaf_id_t *) BS2PC_IdLump(LUMP_ID_LEAFS);
@@ -462,6 +515,56 @@ static void BS2PC_ConvertNodesToId() {
 		BS2PC_SkipNodrawInGbxFaceRange(gbx->firstface, gbx->numfaces, &firstFace, &faceCount);
 		id->firstface = (unsigned short) firstFace;
 		id->numfaces = (unsigned short) faceCount;
+	}
+}
+
+static void BS2PC_ConvertNodesToGbx() {
+	const dnode_id_t *id = (const dnode_id_t *) BS2PC_IdLump(LUMP_ID_NODES);
+	dnode_gbx_t *gbx = (dnode_gbx_t *) BS2PC_GbxLump(LUMP_GBX_NODES);
+	unsigned int index, count = BS2PC_IdLumpSize(LUMP_ID_NODES) / sizeof(dnode_id_t);
+	dleaf_gbx_t *gbxLeafs = (dleaf_gbx_t *) BS2PC_GbxLump(LUMP_GBX_LEAFS);
+	unsigned int leafCount = BS2PC_IdLumpSize(LUMP_ID_LEAFS) / sizeof(dleaf_id_t);
+	unsigned int offset = BS2PC_GbxLumpOffset(LUMP_GBX_NODES);
+
+	// Clearing the parents.
+	for (index = 0; index < count; ++index) {
+		gbx[index].parent = UINT_MAX;
+	}
+	for (index = 0; index < leafCount; ++index) {
+		gbxLeafs[index].parent = UINT_MAX;
+	}
+
+	for (index = 0; index < count; ++index, ++id, ++gbx, offset += sizeof(dnode_gbx_t)) {
+		gbx->contents = 0;
+		gbx->visframe = 0;
+		gbx->plane = BS2PC_GbxIndexToOffset(id->planenum, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
+		gbx->mins[0] = (float) id->mins[0];
+		gbx->mins[1] = (float) id->mins[1];
+		gbx->mins[2] = (float) id->mins[2];
+		gbx->mins[3] = 0.0f;
+		gbx->maxs[0] = (float) id->maxs[0];
+		gbx->maxs[1] = (float) id->maxs[1];
+		gbx->maxs[2] = (float) id->maxs[2];
+		gbx->maxs[3] = 0.0f;
+
+		if (id->children[0] >= 0) {
+			gbx->children[0] = BS2PC_GbxIndexToOffset(id->children[0], LUMP_GBX_NODES, sizeof(dnode_gbx_t));
+			((dnode_gbx_t *) (bs2pc_gbxMap + gbx->children[0]))->parent = offset;
+		} else {
+			gbx->children[0] = BS2PC_GbxIndexToOffset(-(id->children[0] + 1), LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
+			((dleaf_gbx_t *) (bs2pc_gbxMap + gbx->children[0]))->parent = offset;
+		}
+
+		if (id->children[1] >= 0) {
+			gbx->children[1] = BS2PC_GbxIndexToOffset(id->children[1], LUMP_GBX_NODES, sizeof(dnode_gbx_t));
+			((dnode_gbx_t *) (bs2pc_gbxMap + gbx->children[1]))->parent = offset;
+		} else {
+			gbx->children[1] = BS2PC_GbxIndexToOffset(-(id->children[1] + 1), LUMP_GBX_LEAFS, sizeof(dleaf_gbx_t));
+			((dleaf_gbx_t *) (bs2pc_gbxMap + gbx->children[1]))->parent = offset;
+		}
+
+		gbx->firstface = id->firstface;
+		gbx->numfaces = id->numfaces;
 	}
 }
 
@@ -702,7 +805,7 @@ void BS2PC_ConvertTexturesToId() {
 				colorIndexGbx -= 8;
 			}
 
-			colorGbx = paletteGbx + (colorIndexGbx * 4);
+			colorGbx = paletteGbx + colorIndexGbx * 4;
 			if (liquid) {
 				*(paletteId++) = colorGbx[0];
 				*(paletteId++) = colorGbx[1];
@@ -713,6 +816,174 @@ void BS2PC_ConvertTexturesToId() {
 				*(paletteId++) = (unsigned char) (((unsigned int) min(colorGbx[2], 127)) * 255 / 127);
 			}
 		}
+	}
+}
+
+void BS2PC_ConvertTexturesToGbx() {
+	const unsigned char *lumpId = BS2PC_IdLump(LUMP_ID_TEXTURES);
+	unsigned int textureIndex, textureCount = *((const unsigned int *) lumpId);
+	const unsigned int *offsetId = (const unsigned int *) lumpId + 1;
+	dmiptex_gbx_t *textureGbx = (dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
+	const bs2pc_idTextureAdditionalInfo_t *additionalInfo = bs2pc_idTextureAdditionalInfo;
+	bspoffset_t gbxMipOffset = BS2PC_GbxLumpOffset(LUMP_GBX_TEXTURES) + textureCount * sizeof(dmiptex_gbx_t);
+	bspoffset_t gbxPaletteOffset = gbxMipOffset + bs2pc_gbxTextureDataSize;
+
+	for (textureIndex = 0; textureIndex < textureCount; ++textureIndex, ++offsetId, ++textureGbx, ++additionalInfo) {
+		const dmiptex_id_t *textureId = (const dmiptex_id_t *) (lumpId + *offsetId);
+		// Save for the case if a WAD has a differently sized texture.
+		unsigned int width = textureId->width, height = textureId->height;
+		unsigned int scaledWidth = BS2PC_TextureDimensionToGbx(width);
+		unsigned int scaledHeight = BS2PC_TextureDimensionToGbx(height);
+		unsigned int tempWidth, tempHeight;
+		unsigned int mipLevels = 0, mip;
+		const unsigned char *textureData;
+		bspoffset_t lastGbxMipOffset = gbxMipOffset;
+		unsigned int colorIndex;
+		unsigned char *colorGbx;
+		bool liquid = (textureId->name[0] == '!');
+
+		textureGbx->offset = gbxMipOffset;
+		textureGbx->palette = gbxPaletteOffset;
+		textureGbx->width = width;
+		textureGbx->height = height;
+		textureGbx->scaled_width = scaledWidth;
+		textureGbx->scaled_height = scaledHeight;
+		memcpy(textureGbx->name, textureId->name, sizeof(textureGbx->name));
+		memset(textureGbx->unknown1, 0, sizeof(textureGbx->unknown1));
+
+		tempWidth = scaledWidth;
+		tempHeight = scaledHeight;
+		while (true) {
+			++mipLevels;
+			if (tempWidth <= 8 || tempHeight <= 8) {
+				break;
+			}
+			tempWidth >>= 1;
+			tempHeight >>= 1;
+		}
+		textureGbx->miplevels = mipLevels;
+
+		textureGbx->anim_total = additionalInfo->animTotal;
+		if (textureGbx->anim_total != 0) {
+			unsigned int animMin = 0;
+			unsigned int frame = textureGbx->name[1];
+			if (frame >= '0' && frame <= '9') {
+				animMin = frame - '0';
+			} else if (frame >= 'A' && frame <= 'J') {
+				animMin = frame - 'A';
+			} else if (frame >= 'a' && frame <= 'j') {
+				animMin = frame - 'a';
+			}
+			textureGbx->anim_min = animMin;
+			textureGbx->anim_max = animMin + 1;
+			textureGbx->anim_next = BS2PC_GbxIndexToOffset(additionalInfo->animNext, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
+			textureGbx->alternate_anims = (additionalInfo->alternateAnims != UINT_MAX ?
+					BS2PC_GbxIndexToOffset(additionalInfo->alternateAnims, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t)) : UINT_MAX);
+		} else {
+			textureGbx->anim_min = textureGbx->anim_max = 0;
+			textureGbx->anim_next = textureGbx->alternate_anims = UINT_MAX;
+		}
+
+		if (textureId->offsets[0] == 0 || textureId->offsets[1] == 0 ||
+				textureId->offsets[2] == 0 || textureId->offsets[3] == 0) {
+			textureId = (const dmiptex_id_t *) BS2PC_LoadTextureFromWad(textureId->name);
+			if (textureId != NULL && (textureId->offsets[0] == 0 || textureId->offsets[1] == 0 ||
+					textureId->offsets[2] == 0 || textureId->offsets[3] == 0)) {
+				textureId = NULL;
+			}
+		}
+
+		textureData = (const unsigned char *) textureId;
+
+		tempWidth = scaledWidth, tempHeight = scaledHeight;
+		if (textureId != NULL) {
+			unsigned int wadWidth = textureId->width, wadHeight = textureId->height, mip;
+			if (wadWidth == tempWidth && wadHeight == tempHeight) {
+				for (mip = 0; mip < 4; ++mip) {
+					memcpy(bs2pc_gbxMap + gbxMipOffset, textureData + textureId->offsets[mip], tempWidth * tempHeight);
+					lastGbxMipOffset = gbxMipOffset;
+					gbxMipOffset += tempWidth * tempHeight;
+					if (mip >= mipLevels) {
+						break;
+					}
+					tempWidth >>= 1;
+					tempHeight >>= 1;
+				}
+			} else {
+				BS2PC_ResampleTexture(textureData + textureId->offsets[0], wadWidth, wadHeight, bs2pc_gbxMap + gbxMipOffset, tempWidth, tempHeight);
+				gbxMipOffset += tempWidth * tempHeight;
+				mip = 1;
+				tempWidth >>= 1;
+				tempHeight >>= 1;
+			}
+		} else {
+			unsigned int x, y;
+			char *dest = bs2pc_gbxMap + gbxMipOffset;
+			fprintf(stderr, "Texture %s not found or is incomplete in WADs, replacing with a checkerboard.\n", textureGbx->name);
+			for (y = 0; y < tempHeight; ++y) {
+				for (x = 0; x < tempWidth; ++x) {
+					*(dest++) = (((((y & 15)) < 8) ^ (((x & 15)) < 8)) ? 0 : 255);
+				}
+			}
+			gbxMipOffset += tempWidth * tempHeight;
+			mip = 1;
+			tempWidth >>= 1;
+			tempHeight >>= 1;
+		}
+		for (; mip <= mipLevels; ++mip) {
+			BS2PC_ResampleTexture(bs2pc_gbxMap + lastGbxMipOffset, tempWidth << 1, tempHeight << 1, bs2pc_gbxMap + gbxMipOffset, tempWidth, tempHeight);
+			bs2pc_gbxMap += tempWidth * tempHeight;
+			tempWidth >>= 1;
+			tempHeight >>= 1;
+		}
+
+		if (textureId != NULL) {
+			const unsigned char *colorId = textureData + textureId->offsets[3] + (textureId->width >> 3) * (textureId->height >> 3);
+			unsigned int colorCount = *((const unsigned short *) colorId);
+			colorId += sizeof(unsigned short);
+			for (colorIndex = 0; colorIndex < 256; ++colorIndex) {
+				unsigned int colorIndexGbx, colorIndexLow;
+			
+				colorIndexGbx = colorIndex;
+				colorIndexLow = colorIndex & 0x1f;
+				if (colorIndexLow >= 8 && colorIndexLow <= 15) {
+					colorIndexGbx += 8;
+				} else if (colorIndexLow >= 16 && colorIndexLow <= 23) {
+					colorIndexGbx -= 8;
+				}
+				colorGbx = bs2pc_gbxMap + gbxPaletteOffset + colorIndexGbx * 4;
+
+				if (colorIndex < colorCount) {
+					if (liquid) {
+						*(colorGbx++) = *(colorId++);
+						*(colorGbx++) = *(colorId++);
+						*(colorGbx++) = *(colorId++);
+					} else {
+						*(colorGbx++) = *(colorId++) >> 1;
+						*(colorGbx++) = *(colorId++) >> 1;
+						*(colorGbx++) = *(colorId++) >> 1;
+					}
+				} else {
+					*(colorGbx++) = 0;
+					*(colorGbx++) = 0;
+					*(colorGbx++) = 0;
+				}
+				*(colorGbx++) = 0x80;
+			}
+		} else {
+			colorGbx = bs2pc_gbxMap + gbxPaletteOffset;
+			for (colorIndex = 0; colorIndex < 255; ++colorIndex) {
+				*(colorGbx++) = 0;
+				*(colorGbx++) = 0;
+				*(colorGbx++) = 0;
+				*(colorGbx++) = 0x80;
+			}
+			*(colorGbx++) = (liquid ? 0xff : 0x7f);
+			*(colorGbx++) = 0;
+			*(colorGbx++) = (liquid ? 0xff : 0x7f);
+			*(colorGbx++) = 0x80;
+		}
+		gbxPaletteOffset += 256 * 4;
 	}
 }
 

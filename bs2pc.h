@@ -25,7 +25,7 @@ void BS2PC_WriteFile(const char *fileName, void *data, unsigned int size);
 
 void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target, unsigned int targetSize);
 
-void BS2PC_ResampleTexture(unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight);
+void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight);
 
 // Map
 
@@ -68,4 +68,4 @@ void BS2PC_ConvertIdToGbx();
 
 void BS2PC_SetWadDirectory(const char *directory);
 void BS2PC_LoadWadsFromEntities(const char *entities, unsigned int entitiesSize);
-unsigned char *BS2PC_LoadTexture(const char *name);
+unsigned char *BS2PC_LoadTextureFromWad(const char *name);
