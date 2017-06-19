@@ -62,6 +62,7 @@ inline bspoffset_t BS2PC_GbxIndexToOffset(unsigned int index, unsigned int lump,
 // Conversion
 
 void BS2PC_ConvertGbxToId();
+void BS2PC_ConvertIdToGbx();
 
 // WAD texture management
 

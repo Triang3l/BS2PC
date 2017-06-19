@@ -13,35 +13,170 @@ static unsigned int bs2pc_idTextureLumpSize;
 static bool *bs2pc_gbxTexturesSpecial = NULL; // Whether textures are special - texinfo needs this.
 
 static void BS2PC_ProcessGbxTextureLump() {
-	const dmiptex_gbx_t *textureGbx = (const dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
-	unsigned int textureIndex, textureCount = BS2PC_GbxLumpCount(LUMP_GBX_TEXTURES);
+	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
+	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_TEXTURES);
 
-	BS2PC_AllocReplace(&bs2pc_gbxTexturesSpecial, textureCount * sizeof(bool), true);
+	BS2PC_AllocReplace(&bs2pc_gbxTexturesSpecial, count * sizeof(bool), true);
 
 	bs2pc_idTextureLumpSize = sizeof(unsigned int) /* texture count */ +
-			textureCount * (sizeof(bspoffset_t) /* offset */ + sizeof(dmiptex_id_t) + (2 + 768 + 2));
+			count * (sizeof(bspoffset_t) /* offset */ + sizeof(dmiptex_id_t) + (2 + 768 + 2));
 
-	for (textureIndex = 0; textureIndex < textureCount; ++textureIndex) {
-		const char *textureName = textureGbx->name;
+	for (index = 0; index < count; ++index) {
+		const char *name = texture->name;
 		unsigned int width, height;
 
-		if (textureName[0] == '*' ||
-				bs2pc_strncasecmp(textureName, "sky", 3) == 0 ||
-				bs2pc_strncasecmp(textureName, "clip", 4) == 0 ||
-				bs2pc_strncasecmp(textureName, "origin", 6) == 0 ||
-				bs2pc_strncasecmp(textureName, "aaatrigger", 10) == 0 ||
-				bs2pc_strncasecmp(textureName, "nodraw", 6) == 0) {
-			bs2pc_gbxTexturesSpecial[textureIndex] = true;
+		if (name[0] == '*' ||
+				bs2pc_strncasecmp(name, "sky", 3) == 0 ||
+				bs2pc_strncasecmp(name, "clip", 4) == 0 ||
+				bs2pc_strncasecmp(name, "origin", 6) == 0 ||
+				bs2pc_strncasecmp(name, "aaatrigger", 10) == 0) {
+			bs2pc_gbxTexturesSpecial[index] = true;
 		}
 
-		width = textureGbx->width;
-		height = textureGbx->height;
+		width = texture->width;
+		height = texture->height;
 		bs2pc_idTextureLumpSize += width * height +
 				(width >> 1) * (height >> 1) +
 				(width >> 2) * (height >> 2) +
 				(width >> 3) * (height >> 3);
 
-		++textureGbx;
+		++texture;
+	}
+}
+
+typedef struct {
+	unsigned int faceFlags;
+	unsigned int animTotal, animNext, alternateAnims;
+} bs2pc_idTextureAdditionalInfo_t;
+
+static bs2pc_idTextureAdditionalInfo_t *bs2pc_idTextureAdditionalInfo = NULL;
+static unsigned int bs2pc_idAnimatedStart = UINT_MAX, bs2pc_idAnimatedCount = 0;
+
+static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsigned char frame) {
+	char name[16];
+	const unsigned char *lump;
+	const unsigned int *offsets;
+	unsigned int low, mid, high;
+	int difference;
+
+	if (bs2pc_idAnimatedCount == 0) {
+		return UINT_MAX;
+	}
+
+	name[0] = '+';
+	name[1] = frame;
+	strncpy(name + 2, sequenceName, sizeof(name) - 3);
+	name[sizeof(name) - 1] = '\0';
+
+	lump = BS2PC_IdLump(LUMP_ID_TEXTURES);
+	offsets = (const unsigned int *) lump + 1;
+
+	low = bs2pc_idAnimatedStart;
+	high = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount - 1;
+	while (low <= high) {
+		mid = low + ((high - low) >> 1);
+
+		difference = bs2pc_strncasecmp(((const dmiptex_id_t *) (lump + offsets[mid]))->name, name, 15);
+		if (difference == 0) {
+			return mid;
+		}
+		if (difference > 0) {
+			high = mid - 1;
+		} else {
+			low = mid + 1;
+		}
+	}
+
+	return UINT_MAX;
+}
+
+static void BS2PC_ProcessIdTextureLump() {
+	const unsigned char *lump = BS2PC_IdLump(LUMP_ID_TEXTURES);
+	const unsigned int *offsets = (const unsigned int *) lump + 1;
+	unsigned int index, count = *((const unsigned int *) lump);
+
+	BS2PC_AllocReplace(&bs2pc_idTextureAdditionalInfo, count * sizeof(bs2pc_idTextureAdditionalInfo_t), false);
+	bs2pc_idAnimatedStart = UINT_MAX;
+	bs2pc_idAnimatedCount = 0;
+
+	for (index = 0; index < count; ++index) {
+		const dmiptex_id_t *texture = (const dmiptex_id_t *) (lump + offsets[index]);
+		const char *name = texture->name;
+		bs2pc_idTextureAdditionalInfo_t *info = &bs2pc_idTextureAdditionalInfo[index];
+
+		unsigned int flags = 0;
+		if (name[0] == '+') {
+			if (bs2pc_idAnimatedStart == UINT_MAX) {
+				bs2pc_idAnimatedStart = index;
+			}
+			++bs2pc_idAnimatedCount;
+		} else if (name[0] == '!' || bs2pc_strncasecmp(name, "water", 5) == 0) {
+			flags = SURF_DRAWTURB | SURF_DRAWTILED | SURF_SPECIAL | SURF_HASPOLYS;
+		} else if (name[0] == '{') {
+			flags = SURF_HASPOLYS;
+		} else if (bs2pc_strncasecmp(name, "aaatrigger", 10) == 0) {
+			flags = SURF_DRAWTILED | SURF_SPECIAL;
+		} else if (bs2pc_strncasecmp(name, "nodraw", 6) == 0) {
+			flags = SURF_DRAWTILED | SURF_NODRAW | SURF_SPECIAL;
+		} else if (bs2pc_strncasecmp(name, "scroll", 6) == 0) {
+			flags = SURF_DRAWTILED;
+		} else if (bs2pc_strncasecmp(name, "sky", 3) == 0) {
+			flags = SURF_DRAWTILED | SURF_SPECIAL | SURF_DRAWSKY;
+		}
+
+		info->faceFlags = flags;
+		info->animTotal = 0;
+		info->animNext = UINT_MAX;
+		info->alternateAnims = UINT_MAX;
+	}
+
+	if (bs2pc_idAnimatedCount != 0) {
+		unsigned int firstNonAnimated = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount;
+		for (index = bs2pc_idAnimatedStart; index < firstNonAnimated; ++index) {
+			const dmiptex_id_t *texture = (const dmiptex_id_t *) (lump + offsets[index]);
+			const char *name = texture->name;
+			unsigned int seq[10], altSeq[10], count = 1, altCount = 0, frame, found;
+			bs2pc_idTextureAdditionalInfo_t *info;
+
+			if (name[0] != '+') {
+				continue; // Shouldn't happen, but still, reject.
+			}
+			if (name[1] != '0') {
+				break; // Only the beginnings of the chains are needed, the rest will be found with binary search.
+			}
+
+			// Build the sequences.
+			seq[0] = index;
+			altSeq[0] = UINT_MAX;
+			for (frame = 1; frame < 10; ++frame) {
+				found = BS2PC_FindAnimatedIdTexture(name + 2, frame + '0');
+				if (found == UINT_MAX) {
+					break;
+				}
+				seq[count++] = found;
+			}
+			for (frame = 0; frame < 10; ++frame) {
+				found = BS2PC_FindAnimatedIdTexture(name + 2, frame + 'A');
+				if (found == UINT_MAX) {
+					break;
+				}
+				altSeq[altCount++] = found;
+			}
+
+			// Link the frames.
+			for (frame = 0; frame < count; ++frame) {
+				info = &bs2pc_idTextureAdditionalInfo[seq[frame]];
+				info->animTotal = count;
+				info->animNext = seq[frame + 1 < count ? frame + 1 : 0];
+				info->alternateAnims = altSeq[0];
+			}
+			for (frame = 0; frame < altCount; ++frame) {
+				info = &bs2pc_idTextureAdditionalInfo[altSeq[frame]];
+				info->animTotal = altCount;
+				info->animNext = altSeq[frame + 1 < altCount ? frame + 1 : 0];
+				info->alternateAnims = seq[0];
+			}
+		}
 	}
 }
 
@@ -113,6 +248,11 @@ static void BS2PC_PreProcessGbxMap() {
 	BS2PC_ProcessGbxTextureLump();
 	fputs("Building nodraw skipping info...\n", stderr);
 	BS2PC_BuildGbxNodrawSkippingInfo();
+}
+
+static void BS2PC_PreProcessIdMap() {
+	fputs("Processing the texture lump...\n", stderr);
+	BS2PC_ProcessIdTextureLump();
 }
 
 // Conversion
@@ -549,8 +689,7 @@ void BS2PC_ConvertTexturesToId() {
 		*((unsigned short *) paletteId) = 256;
 		paletteId += sizeof(unsigned short);
 		liquid = (textureGbx->name[0] == '!') ||
-				(textureGbx->name[0] >= '0' && textureGbx->name[0] <= '9' && textureGbx->name[1] == '!') ||
-				((textureGbx->name[0] == '+' || textureGbx->name[0] == '-') && textureGbx->name[2] == '!');
+				(textureGbx->name[0] >= '0' && textureGbx->name[0] <= '9' && textureGbx->name[1] == '!');
 		for (colorIndex = 0; colorIndex < 256; ++colorIndex) {
 			unsigned int colorIndexGbx, colorIndexLow;
 			const unsigned char *colorGbx;
@@ -615,4 +754,12 @@ void BS2PC_ConvertGbxToId() {
 	BS2PC_ConvertEntitiesToId();
 	fputs("Converting textures...\n", stderr);
 	BS2PC_ConvertTexturesToId();
+}
+
+void BS2PC_ConvertIdToGbx() {
+	if (((const dheader_id_t *) bs2pc_idMap)->version != BSPVERSION_ID) {
+		fputs("Invalid .bsp version.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	BS2PC_PreProcessIdMap();
 }

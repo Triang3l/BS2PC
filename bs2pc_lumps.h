@@ -158,8 +158,8 @@ typedef struct {
 #define SURF_DRAWTURB 0x10
 #define SURF_DRAWTILED 0x20
 #define SURF_NODRAW 0x100
-#define SURF_SPECIAL 0x200 // All SURF_DRAWTILED except for scrolltoxic.
-#define SURF_HASPOLYS 0x400 // Turbulent or translucent.
+#define SURF_SPECIAL 0x200
+#define SURF_HASPOLYS 0x400
 
 typedef struct {
 	float vecs[2][4];
