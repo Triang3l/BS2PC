@@ -175,7 +175,7 @@ typedef struct {
 	unsigned char unknown2[4];
 	unsigned int firstedge;
 	unsigned int numedges;
-	float len2;
+	float len;
 	short texturemins[2];
 	short extents[2];
 	unsigned char unknown4[28];

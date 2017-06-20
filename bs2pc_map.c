@@ -741,8 +741,8 @@ static void BS2PC_ConvertFacesToGbx() {
 	dface_gbx_t *gbx = (dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES);
 	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
 	for (index = 0; index < count; ++index, ++id, ++gbx) {
-		float len1, len2;
 		const dtexinfo_id_t *texinfo = &texinfoLump[id->texinfo];
+		float len;
 		memset(gbx, 0, sizeof(dface_gbx_t)); // Lots of unknown fields that are probably runtime-only and 0 in the file.
 		memcpy(gbx->vecs, texinfo->vecs, sizeof(gbx->vecs));
 		gbx->side = id->side;
@@ -753,9 +753,12 @@ static void BS2PC_ConvertFacesToGbx() {
 		gbx->plane = BS2PC_GbxIndexToOffset(id->planenum, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
 		gbx->firstedge = id->firstedge;
 		gbx->numedges = id->numedges;
-		len1 = sqrtf(gbx->vecs[0][0] * gbx->vecs[0][0] + gbx->vecs[0][1] * gbx->vecs[0][1] + gbx->vecs[0][2] * gbx->vecs[0][2]);
-		len2 = sqrtf(gbx->vecs[1][0] * gbx->vecs[1][0] + gbx->vecs[1][1] * gbx->vecs[1][1] + gbx->vecs[1][2] * gbx->vecs[1][2]);
-		gbx->len2 = min(len1, len2); // TODO: Choose correctly. It's not min, max, side or extents[0]<>extents[1].
+		len = sqrtf(gbx->vecs[0][0] * gbx->vecs[0][0] + gbx->vecs[0][1] * gbx->vecs[0][1] + gbx->vecs[0][2] * gbx->vecs[0][2]) *
+				sqrtf(gbx->vecs[1][0] * gbx->vecs[1][0] + gbx->vecs[1][1] * gbx->vecs[1][1] + gbx->vecs[1][2] * gbx->vecs[1][2]);
+		if (len < 0.001f) {
+			len = 1.0f;
+		}
+		gbx->len = len;
 		BS2PC_CalcSurfaceExtents(id, gbx->texturemins, gbx->extents);
 		memcpy(gbx->styles, id->styles, sizeof(gbx->styles));
 		// TODO: Polys.
