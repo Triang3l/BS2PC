@@ -511,7 +511,7 @@ static void BS2PC_ConvertLeafsToGbx() {
 	unsigned int index, count = BS2PC_IdLumpSize(LUMP_ID_LEAFS) / sizeof(dleaf_id_t);
 	for (index = 0; index < count; ++index, ++id, ++gbx) {
 		gbx->contents = id->contents;
-		// Parent set by ConvertNodesToGbx.
+		gbx->parent = UINT_MAX;
 		gbx->visframe = 0;
 		gbx->unknown1 = 0;
 		gbx->mins[0] = (float) id->mins[0];
@@ -608,17 +608,6 @@ static void BS2PC_ConvertNodesToId() {
 	}
 }
 
-static void BS2PC_SetGbxNodeParent(bspoffset_t nodeOffset, bspoffset_t parentOffset) {
-	dnode_gbx_t *node = (dnode_gbx_t *) (bs2pc_gbxMap + nodeOffset);
-	if (node->contents < 0) {
-		((dleaf_gbx_t *) node)->parent = parentOffset;
-		return;
-	}
-	node->parent = parentOffset;
-	BS2PC_SetGbxNodeParent(node->children[0], nodeOffset);
-	BS2PC_SetGbxNodeParent(node->children[1], nodeOffset);
-}
-
 static void BS2PC_ConvertNodesToGbx() {
 	const dnode_id_t *id = (const dnode_id_t *) BS2PC_IdLump(LUMP_ID_NODES);
 	dnode_gbx_t *gbx = (dnode_gbx_t *) BS2PC_GbxLump(LUMP_GBX_NODES);
@@ -627,15 +616,9 @@ static void BS2PC_ConvertNodesToGbx() {
 	unsigned int leafCount = BS2PC_IdLumpSize(LUMP_ID_LEAFS) / sizeof(dleaf_id_t);
 	unsigned int offset = BS2PC_GbxLumpOffset(LUMP_GBX_NODES);
 
-	for (index = 0; index < count; ++index) {
-		gbx[index].parent = UINT_MAX;
-	}
-	for (index = 0; index < leafCount; ++index) {
-		gbxLeafs[index].parent = UINT_MAX;
-	}
-
 	for (index = 0; index < count; ++index, ++id, ++gbx, offset += sizeof(dnode_gbx_t)) {
 		gbx->contents = 0;
+		gbx->parent = UINT_MAX;
 		gbx->visframe = 0;
 		gbx->plane = BS2PC_GbxIndexToOffset(id->planenum, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
 		gbx->mins[0] = (float) id->mins[0];
@@ -662,8 +645,17 @@ static void BS2PC_ConvertNodesToGbx() {
 		gbx->firstface = id->firstface;
 		gbx->numfaces = id->numfaces;
 	}
+}
 
-	BS2PC_SetGbxNodeParent(BS2PC_GbxLumpOffset(LUMP_GBX_NODES), UINT_MAX);
+static void BS2PC_SetGbxNodeParent(bspoffset_t nodeOffset, bspoffset_t parentOffset) {
+	dnode_gbx_t *node = (dnode_gbx_t *) (bs2pc_gbxMap + nodeOffset);
+	if (node->contents < 0) {
+		((dleaf_gbx_t *) node)->parent = parentOffset;
+		return;
+	}
+	node->parent = parentOffset;
+	BS2PC_SetGbxNodeParent(node->children[0], nodeOffset);
+	BS2PC_SetGbxNodeParent(node->children[1], nodeOffset);
 }
 
 static void BS2PC_ConvertTexinfoToId() {
@@ -1201,10 +1193,12 @@ void BS2PC_ConvertIdToGbx() {
 	BS2PC_AllocateGbxMapFromId();
 	fputs("Converting planes...\n", stderr);
 	BS2PC_ConvertPlanesToGbx();
-	fputs("Converting leaves...\n", stderr);
-	BS2PC_ConvertLeafsToGbx(); // Must be before ConvertNodesToGbx because of parent linking!
 	fputs("Converting nodes...\n", stderr);
 	BS2PC_ConvertNodesToGbx();
+	fputs("Converting leaves...\n", stderr);
+	BS2PC_ConvertLeafsToGbx();
+	fputs("Linking nodes...\n", stderr);
+	BS2PC_SetGbxNodeParent(BS2PC_GbxLumpOffset(LUMP_GBX_NODES), UINT_MAX);
 	fputs("Copying edges...\n", stderr);
 	BS2PC_CopyLumpToGbx(LUMP_ID_EDGES, LUMP_GBX_EDGES);
 	fputs("Copying surfedges...\n", stderr);
