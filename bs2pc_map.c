@@ -1060,7 +1060,7 @@ void BS2PC_ConvertTexturesToGbx() {
 		tempWidth = scaledWidth;
 		tempHeight = scaledHeight;
 		if (textureId != NULL) {
-			unsigned int wadWidth = textureId->width, wadHeight = textureId->height, mip;
+			unsigned int wadWidth = textureId->width, wadHeight = textureId->height;
 			if (wadWidth == tempWidth && wadHeight == tempHeight) {
 				for (mip = 0; mip < 4 && mip < mipLevels; ++mip) {
 					memcpy(bs2pc_gbxMap + gbxMipOffset, textureData + textureId->offsets[mip], tempWidth * tempHeight);
