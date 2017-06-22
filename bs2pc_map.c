@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 unsigned char *bs2pc_idMap, *bs2pc_gbxMap;
@@ -16,6 +17,11 @@ static bool *bs2pc_gbxTexturesSpecial = NULL; // Whether textures are special - 
 static void BS2PC_ProcessGbxTextureLump() {
 	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
 	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_TEXTURES);
+
+	if (count == 0) {
+		fputs("Map has no textures.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
 
 	BS2PC_AllocReplace(&bs2pc_gbxTexturesSpecial, count * sizeof(bool), true);
 
@@ -66,14 +72,15 @@ typedef struct {
 	unsigned int animTotal, animNext, alternateAnims;
 } bs2pc_idTextureAdditionalInfo_t;
 
+static unsigned int bs2pc_idValidTextureCount = 0;
+static unsigned int *bs2pc_idValidTextureMap = NULL;
+static const dmiptex_id_t **bs2pc_idTextures = NULL;
 static bs2pc_idTextureAdditionalInfo_t *bs2pc_idTextureAdditionalInfo = NULL;
 static unsigned int bs2pc_idAnimatedStart = UINT_MAX, bs2pc_idAnimatedCount = 0;
-static unsigned int bs2pc_gbxTextureDataSize;
+static unsigned int bs2pc_gbxTextureDataSize = 0;
 
 static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsigned char frame) {
 	char name[16];
-	const unsigned char *lump;
-	const unsigned int *offsets;
 	unsigned int low, mid, high;
 	int difference;
 
@@ -86,14 +93,11 @@ static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsign
 	strncpy(name + 2, sequenceName, sizeof(name) - 3);
 	name[sizeof(name) - 1] = '\0';
 
-	lump = BS2PC_IdLump(LUMP_ID_TEXTURES);
-	offsets = (const unsigned int *) lump + 1;
-
 	low = bs2pc_idAnimatedStart;
 	high = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount - 1;
 	while (low <= high) {
 		mid = low + ((high - low) >> 1);
-		difference = bs2pc_strncasecmp(((const dmiptex_id_t *) (lump + offsets[mid]))->name, name, 15);
+		difference = bs2pc_strncasecmp(bs2pc_idTextures[mid]->name, name, 15);
 		if (difference == 0) {
 			return mid;
 		}
@@ -110,15 +114,59 @@ static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsign
 static void BS2PC_ProcessIdTextureLump() {
 	const unsigned char *lump = BS2PC_IdLump(LUMP_ID_TEXTURES);
 	const unsigned int *offsets = (const unsigned int *) lump + 1;
-	unsigned int index, count = *((const unsigned int *) lump);
+	unsigned int index, count = *((const unsigned int *) lump), validCount = 0;
+	unsigned int nodrawIndex = UINT_MAX;
 
-	BS2PC_AllocReplace(&bs2pc_idTextureAdditionalInfo, count * sizeof(bs2pc_idTextureAdditionalInfo_t), false);
+	if (count == 0) {
+		fputs("Map has no textures.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	// Replacing textures with UINT_MAX offset with nodraw.
+	BS2PC_AllocReplace(&bs2pc_idValidTextureMap, count * sizeof(unsigned int), true);
+	BS2PC_AllocReplace((void **) &bs2pc_idTextures, (count + 1) * sizeof(dmiptex_id_t *), false); // + 1 for nodraw.
+	bs2pc_idValidTextureCount = 0;
+	for (index = 0; index < count; ++index) {
+		unsigned int offset = offsets[index];
+		const dmiptex_id_t *validTexture;
+		int comparison;
+		if (offset == UINT_MAX) {
+			bs2pc_idValidTextureMap[index] = nodrawIndex;
+			continue;
+		}
+		bs2pc_idValidTextureMap[index] = validCount;
+		validTexture = (const dmiptex_id_t *) (lump + offset);
+		if (nodrawIndex == UINT_MAX) {
+			// Insert nodraw if needed.
+			comparison = bs2pc_strncasecmp("nodraw", validTexture->name, sizeof(validTexture->name) - 1);
+			if (comparison <= 0) {
+				nodrawIndex = validCount;
+				if (comparison < 0) {
+					bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
+				}
+			}
+		}
+		bs2pc_idTextures[validCount++] = validTexture;
+	}
+	if (nodrawIndex == UINT_MAX) {
+		// In case all textures are named alphabetically prior to nodraw.
+		nodrawIndex = validCount;
+		bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
+	}
+	for (index = 0; index < count; ++index) {
+		if (bs2pc_idValidTextureMap[index] == UINT_MAX) {
+			bs2pc_idValidTextureMap[index] = nodrawIndex;
+		}
+	}
+	bs2pc_idValidTextureCount = validCount;
+
+	BS2PC_AllocReplace(&bs2pc_idTextureAdditionalInfo, validCount * sizeof(bs2pc_idTextureAdditionalInfo_t), false);
 	bs2pc_idAnimatedStart = UINT_MAX;
 	bs2pc_idAnimatedCount = 0;
 	bs2pc_gbxTextureDataSize = 0;
 
-	for (index = 0; index < count; ++index) {
-		const dmiptex_id_t *texture = (const dmiptex_id_t *) (lump + offsets[index]);
+	for (index = 0; index < validCount; ++index) {
+		const dmiptex_id_t *texture = bs2pc_idTextures[index];
 		const char *name = texture->name;
 		bs2pc_idTextureAdditionalInfo_t *info = &bs2pc_idTextureAdditionalInfo[index];
 		unsigned int scaledWidth, scaledHeight;
@@ -163,8 +211,7 @@ static void BS2PC_ProcessIdTextureLump() {
 	if (bs2pc_idAnimatedCount != 0) {
 		unsigned int firstNonAnimated = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount;
 		for (index = bs2pc_idAnimatedStart; index < firstNonAnimated; ++index) {
-			const dmiptex_id_t *texture = (const dmiptex_id_t *) (lump + offsets[index]);
-			const char *name = texture->name;
+			const char *name = bs2pc_idTextures[index]->name;
 			unsigned int seq[10], altSeq[10], count = 1, altCount = 0, frame, found;
 			bs2pc_idTextureAdditionalInfo_t *info;
 
@@ -222,6 +269,11 @@ static void BS2PC_BuildGbxNodrawSkippingInfo() {
 	unsigned int faceIndex, marksurfaceIndex;
 	const dface_gbx_t *faces, *face;
 	const dmarksurface_gbx_t *marksurface;
+
+	if (faceCount == 0 || marksurfaceCount == 0) {
+		fputs("Map has no surfaces.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
 
 	BS2PC_AllocReplace(&bs2pc_nodrawFaceMap, faceCount * sizeof(unsigned int), false);
 	bs2pc_faceCountWithoutNodraw = 0;
@@ -431,7 +483,7 @@ static void BS2PC_AllocateGbxMapFromId() {
 	mapSize += (headerGbx.lumplen[LUMP_GBX_LIGHTING] + 15) & ~15;
 
 	headerGbx.lumpofs[LUMP_GBX_TEXTURES] = mapSize;
-	headerGbx.lumpnum[LUMP_GBX_TEXTURES] = *((const unsigned int *) BS2PC_IdLump(LUMP_ID_TEXTURES));
+	headerGbx.lumpnum[LUMP_GBX_TEXTURES] = bs2pc_idValidTextureCount;
 	headerGbx.lumplen[LUMP_GBX_TEXTURES] = headerGbx.lumpnum[LUMP_GBX_TEXTURES] * (sizeof(dmiptex_gbx_t) + 256 * 4) + bs2pc_gbxTextureDataSize;
 	mapSize += (headerGbx.lumplen[LUMP_GBX_TEXTURES] + 15) & ~15;
 
@@ -742,13 +794,14 @@ static void BS2PC_ConvertFacesToGbx() {
 	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
 	for (index = 0; index < count; ++index, ++id, ++gbx) {
 		const dtexinfo_id_t *texinfo = &texinfoLump[id->texinfo];
+		unsigned int miptex = bs2pc_idValidTextureMap[texinfo->miptex];
 		float len;
 		memset(gbx, 0, sizeof(dface_gbx_t)); // Lots of unknown fields that are probably runtime-only and 0 in the file.
 		memcpy(gbx->vecs, texinfo->vecs, sizeof(gbx->vecs));
 		gbx->side = id->side;
 		// TODO: Don't skip SURF_HASPOLYS when subdivision is done.
-		gbx->flags = (gbx->side != 0 ? SURF_PLANEBACK : 0) | (bs2pc_idTextureAdditionalInfo[texinfo->miptex].faceFlags & ~SURF_HASPOLYS);
-		gbx->miptex = BS2PC_GbxIndexToOffset(texinfo->miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
+		gbx->flags = (gbx->side != 0 ? SURF_PLANEBACK : 0) | (bs2pc_idTextureAdditionalInfo[miptex].faceFlags & ~SURF_HASPOLYS);
+		gbx->miptex = BS2PC_GbxIndexToOffset(miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
 		gbx->lightofs = id->lightofs + (id->lightofs != UINT_MAX ? BS2PC_GbxLumpOffset(LUMP_GBX_LIGHTING) : 0);
 		gbx->plane = BS2PC_GbxIndexToOffset(id->planenum, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
 		gbx->firstedge = id->firstedge;
@@ -982,16 +1035,14 @@ void BS2PC_ConvertTexturesToId() {
 }
 
 void BS2PC_ConvertTexturesToGbx() {
-	const unsigned char *lumpId = BS2PC_IdLump(LUMP_ID_TEXTURES);
-	unsigned int textureIndex, textureCount = *((const unsigned int *) lumpId);
-	const unsigned int *offsetId = (const unsigned int *) lumpId + 1;
+	unsigned int textureIndex, textureCount = bs2pc_idValidTextureCount;
 	dmiptex_gbx_t *textureGbx = (dmiptex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_TEXTURES);
 	const bs2pc_idTextureAdditionalInfo_t *additionalInfo = bs2pc_idTextureAdditionalInfo;
 	bspoffset_t gbxMipOffset = BS2PC_GbxLumpOffset(LUMP_GBX_TEXTURES) + textureCount * sizeof(dmiptex_gbx_t);
 	bspoffset_t gbxPaletteOffset = gbxMipOffset + bs2pc_gbxTextureDataSize;
 
-	for (textureIndex = 0; textureIndex < textureCount; ++textureIndex, ++offsetId, ++textureGbx, ++additionalInfo) {
-		const dmiptex_id_t *textureId = (const dmiptex_id_t *) (lumpId + *offsetId);
+	for (textureIndex = 0; textureIndex < textureCount; ++textureIndex, ++textureGbx, ++additionalInfo) {
+		const dmiptex_id_t *textureId = bs2pc_idTextures[textureIndex];
 		// Save for the case if a WAD has a differently sized texture.
 		unsigned int width = textureId->width, height = textureId->height;
 		unsigned int scaledWidth = BS2PC_TextureDimensionToGbx(width);
