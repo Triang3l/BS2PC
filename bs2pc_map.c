@@ -125,38 +125,51 @@ static void BS2PC_ProcessIdTextureLump() {
 	// Replacing textures with UINT_MAX offset with nodraw.
 	BS2PC_AllocReplace(&bs2pc_idValidTextureMap, count * sizeof(unsigned int), true);
 	BS2PC_AllocReplace((void **) &bs2pc_idTextures, (count + 1) * sizeof(dmiptex_id_t *), false); // + 1 for nodraw.
-	bs2pc_idValidTextureCount = 0;
+	// Check if we have any invalid textures at all.
 	for (index = 0; index < count; ++index) {
-		unsigned int offset = offsets[index];
-		const dmiptex_id_t *validTexture;
-		int comparison;
-		if (offset == UINT_MAX) {
-			bs2pc_idValidTextureMap[index] = nodrawIndex;
-			continue;
+		if (offsets[index] == UINT_MAX) {
+			break;
 		}
-		bs2pc_idValidTextureMap[index] = validCount;
-		validTexture = (const dmiptex_id_t *) (lump + offset);
-		if (nodrawIndex == UINT_MAX) {
-			// Insert nodraw if needed.
-			comparison = bs2pc_strncasecmp("nodraw", validTexture->name, sizeof(validTexture->name) - 1);
-			if (comparison <= 0) {
-				nodrawIndex = validCount;
-				if (comparison < 0) {
-					bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
+	}
+	if (index < count) {
+		for (index = 0; index < count; ++index) {
+			unsigned int offset = offsets[index];
+			const dmiptex_id_t *validTexture;
+			int comparison;
+			if (offset == UINT_MAX) {
+				bs2pc_idValidTextureMap[index] = nodrawIndex;
+				continue;
+			}
+			bs2pc_idValidTextureMap[index] = validCount;
+			validTexture = (const dmiptex_id_t *) (lump + offset);
+			if (nodrawIndex == UINT_MAX) {
+				// Insert nodraw if needed.
+				comparison = bs2pc_strncasecmp("nodraw", validTexture->name, sizeof(validTexture->name) - 1);
+				if (comparison <= 0) {
+					nodrawIndex = validCount;
+					if (comparison < 0) {
+						bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
+					}
 				}
 			}
+			bs2pc_idTextures[validCount++] = validTexture;
 		}
-		bs2pc_idTextures[validCount++] = validTexture;
-	}
-	if (nodrawIndex == UINT_MAX) {
-		// In case all textures are named alphabetically prior to nodraw.
-		nodrawIndex = validCount;
-		bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
-	}
-	for (index = 0; index < count; ++index) {
-		if (bs2pc_idValidTextureMap[index] == UINT_MAX) {
-			bs2pc_idValidTextureMap[index] = nodrawIndex;
+		if (nodrawIndex == UINT_MAX) {
+			// In case all textures are named alphabetically prior to nodraw.
+			nodrawIndex = validCount;
+			bs2pc_idTextures[validCount++] = (const dmiptex_id_t *) bs2pc_nodrawIdTexture;
 		}
+		for (index = 0; index < count; ++index) {
+			if (bs2pc_idValidTextureMap[index] == UINT_MAX) {
+				bs2pc_idValidTextureMap[index] = nodrawIndex;
+			}
+		}
+	} else {
+		for (index = 0; index < count; ++index) {
+			bs2pc_idValidTextureMap[index] = index;
+			bs2pc_idTextures[index] = (const dmiptex_id_t *) (lump + offsets[index]);
+		}
+		validCount = count;
 	}
 	bs2pc_idValidTextureCount = validCount;
 
