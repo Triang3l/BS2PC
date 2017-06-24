@@ -97,7 +97,7 @@ static unsigned int BS2PC_FindAnimatedIdTexture(const char *sequenceName, unsign
 	high = bs2pc_idAnimatedStart + bs2pc_idAnimatedCount - 1;
 	while (low <= high) {
 		mid = low + ((high - low) >> 1);
-		difference = bs2pc_strncasecmp(bs2pc_idTextures[mid]->name, name, 15);
+		difference = BS2PC_CompareTextureNames(bs2pc_idTextures[mid]->name, name);
 		if (difference == 0) {
 			return mid;
 		}
@@ -144,7 +144,7 @@ static void BS2PC_ProcessIdTextureLump() {
 			validTexture = (const dmiptex_id_t *) (lump + offset);
 			if (nodrawIndex == UINT_MAX) {
 				// Insert nodraw if needed.
-				comparison = bs2pc_strncasecmp("nodraw", validTexture->name, sizeof(validTexture->name) - 1);
+				comparison = BS2PC_CompareTextureNames("NODRAW", validTexture->name);
 				if (comparison <= 0) {
 					nodrawIndex = validCount;
 					if (comparison < 0) {
@@ -346,6 +346,8 @@ static void BS2PC_PreProcessGbxMap() {
 }
 
 static void BS2PC_PreProcessIdMap() {
+	fputs("Loading WAD files...\n", stderr);
+	BS2PC_LoadWadsFromEntities((const char *) BS2PC_IdLump(LUMP_ID_ENTITIES), BS2PC_IdLumpSize(LUMP_ID_ENTITIES));
 	fputs("Processing the texture lump...\n", stderr);
 	BS2PC_ProcessIdTextureLump();
 }

@@ -20,25 +20,46 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "bs2pc.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-int main(int argc, const char **argv) {
+int main(int argc, const char * const *argv) {
+	int argi;
+	bool parsingGame = false;
+	const char *sourceFileName = NULL, *targetFileName = NULL;
 	unsigned char *sourceFile;
 	long sourceFileSize;
 	unsigned int beginning;
 	size_t targetFileNameLength;
-	char *targetFileName;
+	char *targetFileNameBuffer;
 
 	fputs("BS2PC build 3 - Half-Life PlayStation 2 map converter.\n", stderr);
-	if (argc < 2) {
-		fputs("Specify the .bs2 or .bsp file path and, for .bsp to .bs2, optionally `-game path_to_WADs` when launching.\n", stderr);
+	for (argi = 1; argi < argc; ++argi) {
+		const char *arg = argv[argi];
+		if (parsingGame) {
+			BS2PC_AddWadDirectory(arg);
+			parsingGame = false;
+		} else {
+			if (bs2pc_strcasecmp(arg, "-game") == 0) {
+				parsingGame = true;
+			} else if (targetFileName == NULL) {
+				if (sourceFileName != NULL) {
+					targetFileName = arg;
+				} else {
+					sourceFileName = arg;
+				}
+			}
+		}
+	}
+	if (sourceFileName == NULL) {
+		fputs("Usage: [-game \"path to base WAD directory for .bsp to .bs2\"] [-game \"path to mod WAD directory\"] \"source file name\" [\"target file name\"].\n", stderr);
 		return EXIT_SUCCESS;
 	}
 
 	fputs("Loading the source file...\n", stderr);
-	sourceFile = (unsigned char *) BS2PC_LoadFile(argv[1], &sourceFileSize);
+	sourceFile = (unsigned char *) BS2PC_LoadFile(sourceFileName, &sourceFileSize);
 	if (sourceFileSize <= sizeof(unsigned int)) {
 		fputs("Source file size is invalid.\n", stderr);
 		return EXIT_FAILURE;
@@ -50,21 +71,24 @@ int main(int argc, const char **argv) {
 		bs2pc_idMapSize = sourceFileSize;
 		bs2pc_idMap = sourceFile;
 
-		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision, compression and WAD directory are missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
+		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision and compression are missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
 		BS2PC_ConvertIdToGbx();
 
 		fputs("Writing the .bs2 file...\n", stderr);
-		targetFileNameLength = strlen(argv[1]);
-		targetFileName = bs2pc_alloca(targetFileNameLength + 5);
-		strcpy(targetFileName, argv[1]);
-		if (targetFileNameLength >= 4 && bs2pc_strcasecmp(targetFileName + targetFileNameLength - 4, ".bsp") == 0) {
-			targetFileName[targetFileNameLength - 1] = '2';
-		} else {
-			strcpy(targetFileName + targetFileNameLength, ".bs2");
+		if (targetFileName == NULL) {
+			targetFileNameLength = strlen(sourceFileName);
+			targetFileNameBuffer = bs2pc_alloca(targetFileNameLength + 5);
+			strcpy(targetFileNameBuffer, sourceFileName);
+			if (targetFileNameLength >= 4 && bs2pc_strcasecmp(targetFileNameBuffer + targetFileNameLength - 4, ".bsp") == 0) {
+				targetFileNameBuffer[targetFileNameLength - 1] = '2';
+			} else {
+				strcpy(targetFileNameBuffer + targetFileNameLength, ".bs2");
+			}
+			targetFileName = targetFileNameBuffer;
 		}
 		BS2PC_WriteFile(targetFileName, bs2pc_gbxMap, bs2pc_gbxMapSize);
 
-		fprintf(stderr, "%s converted to %s.\n", argv[1], targetFileName);
+		fprintf(stderr, "%s converted to %s.\n", sourceFileName, targetFileName);
 	} else {
 		if (beginning != BSPVERSION_GBX) {
 			fputs("Decompressing .bs2...\n", stderr);
@@ -81,17 +105,20 @@ int main(int argc, const char **argv) {
 		BS2PC_ConvertGbxToId();
 
 		fputs("Writing the .bsp file...\n", stderr);
-		targetFileNameLength = strlen(argv[1]);
-		targetFileName = bs2pc_alloca(targetFileNameLength + 5);
-		strcpy(targetFileName, argv[1]);
-		if (targetFileNameLength >= 4 && bs2pc_strcasecmp(targetFileName + targetFileNameLength - 4, ".bs2") == 0) {
-			targetFileName[targetFileNameLength - 1] = (targetFileName[targetFileNameLength - 3] == 'B' ? 'P' : 'p');
-		} else {
-			strcpy(targetFileName + targetFileNameLength, ".bsp");
+		if (targetFileName == NULL) {
+			targetFileNameLength = strlen(sourceFileName);
+			targetFileNameBuffer = bs2pc_alloca(targetFileNameLength + 5);
+			strcpy(targetFileNameBuffer, sourceFileName);
+			if (targetFileNameLength >= 4 && bs2pc_strcasecmp(targetFileNameBuffer + targetFileNameLength - 4, ".bs2") == 0) {
+				targetFileNameBuffer[targetFileNameLength - 1] = (targetFileNameBuffer[targetFileNameLength - 3] == 'B' ? 'P' : 'p');
+			} else {
+				strcpy(targetFileNameBuffer + targetFileNameLength, ".bsp");
+			}
+			targetFileName = targetFileNameBuffer;
 		}
 		BS2PC_WriteFile(targetFileName, bs2pc_idMap, bs2pc_idMapSize);
 
-		fprintf(stderr, "%s converted to %s.\n", argv[1], targetFileName);
+		fprintf(stderr, "%s converted to %s.\n", sourceFileName, targetFileName);
 	}
 
 	return EXIT_SUCCESS;

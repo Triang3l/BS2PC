@@ -154,8 +154,7 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 }
 
 // GL_Resample8BitTexture from Quake.
-void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight)
-{
+void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight) {
 	int i, j;
 	const unsigned char *inrow;
 	unsigned frac, fracstep;
@@ -177,4 +176,24 @@ void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, u
 			frac += fracstep;
 		}
 	}
+}
+
+int BS2PC_CompareTextureNames(const char *name1, const char *name2) {
+	unsigned int index;
+	for (index = 0; index < 15; ++index) {
+		int char1 = name1[index], char2 = name2[index];
+		if (char1 >= 'a' && char1 <= 'z') {
+			char1 -= 'a' - 'A';
+		}
+		if (char2 >= 'a' && char2 <= 'z') {
+			char2 -= 'a' - 'A';
+		}
+		if (char1 != char2) {
+			return char1 - char2;
+		}
+		if (char1 == '\0') {
+			break;
+		}
+	}
+	return 0;
 }

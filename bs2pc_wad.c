@@ -4,18 +4,31 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char *bs2pc_wadDirectory = NULL;
-static size_t bs2pc_wadDirectoryLength;
+typedef struct bs2pc_wadDirectory_s {
+	char *path;
+	size_t pathLength;
+	struct bs2pc_wadDirectory_s *next;
+} bs2pc_wadDirectory_t;
+static bs2pc_wadDirectory_t *bs2pc_wadDirectories = NULL;
+static size_t bs2pc_longestWadDirectoryPath = 0;
+
 static unsigned int bs2pc_maxWadLumpSize = 0;
 
-void BS2PC_SetWadDirectory(const char *directory) {
-	size_t length = strlen(directory);
+void BS2PC_AddWadDirectory(const char *path) {
+	size_t length = strlen(path);
+	bs2pc_wadDirectory_t *directory;
 	if (length == 0) {
 		return;
 	}
-	BS2PC_AllocReplace(&bs2pc_wadDirectory, length + 1, false);
-	strcpy(bs2pc_wadDirectory, directory);
-	bs2pc_wadDirectoryLength = length;
+	directory = BS2PC_Alloc(sizeof(bs2pc_wadDirectory_t), false);
+	directory->path = BS2PC_Alloc(length + 1, false);
+	strcpy(directory->path, path);
+	directory->pathLength = length;
+	directory->next = bs2pc_wadDirectories;
+	bs2pc_wadDirectories = directory;
+	if (length > bs2pc_longestWadDirectoryPath) {
+		bs2pc_longestWadDirectoryPath = length;
+	}
 }
 
 #pragma pack(push, 4)
@@ -52,16 +65,27 @@ static void BS2PC_LoadWad(const char *fileName /* Assuming / slash */) {
 	char *fileNameWithGame;
 	bs2pc_wadHeader_t header;
 	bs2pc_wad_t *wad;
+	unsigned int index;
+	const bs2pc_wadLumpInfo_t *lump;
 
 	file = fopen(fileName, "rb");
-	if (file == NULL && bs2pc_wadDirectory != NULL) {
+	if (file != NULL) {
+		fprintf(stderr, "%s loaded.\n", fileName);
+	} else if (bs2pc_wadDirectories != NULL) {
+		const bs2pc_wadDirectory_t *wadDirectory;
 		const char *fileNameRelative = strrchr(fileName, '/');
 		fileNameRelative = (fileNameRelative != NULL ? fileNameRelative + 1 : fileName);
-		fileNameWithGame = bs2pc_alloca(bs2pc_wadDirectoryLength + 1 + strlen(fileNameRelative) + 1);
-		strcpy(fileNameWithGame, bs2pc_wadDirectory);
-		fileNameWithGame[bs2pc_wadDirectoryLength] = '/';
-		strcpy(fileNameWithGame + bs2pc_wadDirectoryLength + 1, fileNameRelative);
-		file = fopen(fileNameWithGame, "rb");
+		fileNameWithGame = bs2pc_alloca(bs2pc_longestWadDirectoryPath + 1 + strlen(fileNameRelative) + 1);
+		for (wadDirectory = bs2pc_wadDirectories; wadDirectory != NULL; wadDirectory = wadDirectory->next) {
+			strcpy(fileNameWithGame, wadDirectory->path);
+			fileNameWithGame[wadDirectory->pathLength] = '/';
+			strcpy(fileNameWithGame + wadDirectory->pathLength + 1, fileNameRelative);
+			file = fopen(fileNameWithGame, "rb");
+			if (file != NULL) {
+				fprintf(stderr, "%s loaded.\n", fileNameWithGame);
+				break;
+			}
+		}
 	}
 
 	if (file == NULL) {
@@ -102,6 +126,13 @@ static void BS2PC_LoadWad(const char *fileName /* Assuming / slash */) {
 	}
 	wad->next = bs2pc_wads;
 	bs2pc_wads = wad;
+
+	lump = wad->lumps;
+	for (index = 0; index < header.numlumps; ++index, ++lump) {
+		if (lump->size > bs2pc_maxWadLumpSize) {
+			bs2pc_maxWadLumpSize = lump->size;
+		}
+	}
 }
 
 static void BS2PC_LoadWadsFromList(const char *list, unsigned int listLength) {
@@ -110,9 +141,9 @@ static void BS2PC_LoadWadsFromList(const char *list, unsigned int listLength) {
 	size_t index;
 
 	fileName = (char *) bs2pc_alloca(listLength + 1);
-	for (index = 0; index < listLength; ++index) {
+	for (index = 0; index <= listLength /* For +1 */; ++index) {
 		int character = list[index];
-		if (character == ';') {
+		if (character == ';' || character == '"') {
 			if (fileNameLength != 0) {
 				fileName[fileNameLength] = '\0';
 				BS2PC_LoadWad(fileName);
@@ -135,8 +166,8 @@ void BS2PC_LoadWadsFromEntities(const char *entities, unsigned int entitiesSize)
 		if (stringStart != NULL) {
 			if (character == '"') {
 				if (isKey) {
-					isWadList = (stringLength == 3 && bs2pc_strncasecmp(stringStart, "wad", 3)) ||
-							(stringLength == 4 && bs2pc_strncasecmp(stringStart, "_wad", 4));
+					isWadList = (stringLength == 3 && bs2pc_strncasecmp(stringStart, "wad", 3) == 0) ||
+							(stringLength == 4 && bs2pc_strncasecmp(stringStart, "_wad", 4) == 0);
 				} else if (isWadList) {
 					BS2PC_LoadWadsFromList(stringStart, stringLength);
 				}
@@ -169,14 +200,30 @@ static unsigned int bs2pc_wadLumpBufferSize = 0;
 
 unsigned char *BS2PC_LoadTextureFromWad(const char *name) {
 	const bs2pc_wad_t *wad;
-	bs2pc_wadLumpInfo_t keyLumpInfo;
 	const bs2pc_wadLumpInfo_t *lumpInfo = NULL;
 
-	strncpy(keyLumpInfo.name, name, sizeof(keyLumpInfo.name) - 1);
-	keyLumpInfo.name[sizeof(keyLumpInfo.name) - 1] = '\0';
+	if (bs2pc_maxWadLumpSize == 0) {
+		return NULL;
+	}
+
 	for (wad = bs2pc_wads; wad != NULL; wad = wad->next) {
-		lumpInfo = (const bs2pc_wadLumpInfo_t *) bsearch(&keyLumpInfo, wad->lumps,
-				wad->lumpCount, sizeof(bs2pc_wadLumpInfo_t), BS2PC_WadSearchComparison);
+		const bs2pc_wadLumpInfo_t *lumps = wad->lumps;
+		unsigned int low = 0, mid, high = wad->lumpCount;
+		int difference;
+		while (low <= high) {
+			mid = low + ((high - low) >> 1);
+			difference = BS2PC_CompareTextureNames(lumps[mid].name, name);
+			if (difference == 0) {
+				lumpInfo = &lumps[mid];
+				break;
+			}
+			if (difference > 0) {
+				high = mid - 1;
+			} else {
+				low = mid + 1;
+			}
+		}
+
 		if (lumpInfo == NULL) {
 			continue;
 		}

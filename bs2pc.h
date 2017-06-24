@@ -27,6 +27,8 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 
 void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight);
 
+int BS2PC_CompareTextureNames(const char *name1, const char *name2);
+
 // Map
 
 extern unsigned char *bs2pc_idMap, *bs2pc_gbxMap;
@@ -67,6 +69,6 @@ extern const unsigned char bs2pc_nodrawIdTexture[1152];
 
 // WAD texture management
 
-void BS2PC_SetWadDirectory(const char *directory);
+void BS2PC_AddWadDirectory(const char *path);
 void BS2PC_LoadWadsFromEntities(const char *entities, unsigned int entitiesSize);
 unsigned char *BS2PC_LoadTextureFromWad(const char *name);
