@@ -29,6 +29,10 @@ void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, u
 
 int BS2PC_CompareTextureNames(const char *name1, const char *name2);
 
+inline float BS2PC_DotProduct(const float x[3], const float y[3]) {
+	return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+}
+
 // Map
 
 extern unsigned char *bs2pc_idMap, *bs2pc_gbxMap;
@@ -66,6 +70,25 @@ inline bspoffset_t BS2PC_GbxIndexToOffset(unsigned int index, unsigned int lump,
 void BS2PC_ConvertGbxToId();
 void BS2PC_ConvertIdToGbx();
 extern const unsigned char bs2pc_nodrawIdTexture[1152];
+
+// Polygon subdivision
+
+#pragma pack(push, 4)
+typedef struct {
+	float xyz[3];
+	float st[2];
+	unsigned char f, b;
+	unsigned char pad[2];
+} bs2pc_polyvert_t;
+#pragma pack(pop)
+
+typedef struct bs2pc_poly_s {
+	struct bs2pc_poly_s *next;
+	unsigned int numverts;
+	bs2pc_polyvert_t verts[4]; // Variable sized.
+} bs2pc_poly_t;
+
+bs2pc_poly_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face);
 
 // WAD texture management
 
