@@ -77,7 +77,7 @@ extern const unsigned char bs2pc_nodrawIdTexture[1152];
 typedef struct {
 	float xyz[3];
 	float st[2];
-	unsigned char f, b;
+	unsigned char stoffset[2]; // Multiplies of 16 relative to texturemins.
 	unsigned char pad[2];
 } bs2pc_polyvert_t;
 #pragma pack(pop)
