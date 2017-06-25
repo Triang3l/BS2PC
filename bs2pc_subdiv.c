@@ -3,10 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static const float *bs2pc_warptexvecs;
-static float bs2pc_warptexscale[2], bs2pc_warptexoffset[2];
+static bs2pc_poly_t *bs2pc_warpPoly;
 
-static bs2pc_poly_t *bs2pc_warppoly;
+#define BS2PC_MAX_POLY_VERTS 1024
+static float bs2pc_polyVertData[BS2PC_MAX_POLY_VERTS][3];
+static unsigned int bs2pc_polyVertCount;
+#define BS2PC_POLY_VERT_EPSILON 0.001f
 
 #define BS2PC_SUBDIVIDE_SIZE 64.0f
 
@@ -29,6 +31,26 @@ static void BS2PC_BoundPoly(unsigned int numverts, float *verts, float mins[3], 
 	}
 }
 
+static unsigned int BS2PC_AddPolyVertex(float vert[3]) {
+	unsigned int vertIndex;
+	float *otherVert;
+	for (vertIndex = 0, otherVert = &bs2pc_polyVertData[0][0]; vertIndex < bs2pc_polyVertCount; ++vertIndex, otherVert += 3) {
+		if (fabsf(vert[0] - otherVert[0]) <= BS2PC_POLY_VERT_EPSILON &&
+				fabsf(vert[1] - otherVert[1]) <= BS2PC_POLY_VERT_EPSILON &&
+				fabsf(vert[2] - otherVert[2]) <= BS2PC_POLY_VERT_EPSILON) {
+			return vertIndex;
+		}
+	}
+	if (bs2pc_polyVertCount >= BS2PC_MAX_POLY_VERTS) {
+		fputs("Too many vertices after face subdivision.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	otherVert[0] = vert[0];
+	otherVert[1] = vert[1];
+	otherVert[2] = vert[2];
+	return bs2pc_polyVertCount++;
+}
+
 static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	unsigned int i, j, k;
 	float mins[3], maxs[3];
@@ -39,10 +61,9 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	float dist[64];
 	float frac;
 	bs2pc_poly_t *poly;
-	bs2pc_polyvert_t *polyvert;
 
 	if (numverts > 60) {
-		fputs("Too many subdivision vertices\n.", stderr);
+		fputs("Too many vertices in a face subdivision step\n.", stderr);
 		exit(EXIT_FAILURE);
 	}
 
@@ -103,33 +124,31 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 		BS2PC_SubdividePolygon(b, back);
 	}
 
-	poly = (bs2pc_poly_t *) BS2PC_Alloc(sizeof(bs2pc_poly_t) + (numverts - 4) * sizeof(bs2pc_polyvert_t), false);
-	poly->next = bs2pc_warppoly;
-	bs2pc_warppoly = poly;
-	poly->numverts = numverts;
-	polyvert = poly->verts;
-	for (i = 0; i < numverts; ++i, verts += 3, ++polyvert) {
-		polyvert->xyz[0] = verts[0];
-		polyvert->xyz[1] = verts[1];
-		polyvert->xyz[2] = verts[2];
-		polyvert->st[0] = (BS2PC_DotProduct(verts, bs2pc_warptexvecs) + bs2pc_warptexvecs[3]) * bs2pc_warptexscale[0] - bs2pc_warptexoffset[0];
-		polyvert->st[1] = (BS2PC_DotProduct(verts, bs2pc_warptexvecs + 4) + bs2pc_warptexvecs[7]) * bs2pc_warptexscale[1] - bs2pc_warptexoffset[1];
+	poly = (bs2pc_poly_t *) BS2PC_Alloc(sizeof(bs2pc_poly_t) + (numverts - 4) * sizeof(unsigned int), false);
+	poly->next = bs2pc_warpPoly;
+	bs2pc_warpPoly = poly;
+	poly->numindices = numverts;
+	for (i = 0; i < numverts; ++i, verts += 3) {
 		// TODO: Numbers in the subdivision.
-		polyvert->f = 0;
-		polyvert->b = 0;
-		polyvert->pad[0] = polyvert->pad[1] = 0;
+		poly->indices[i] = BS2PC_AddPolyVertex(verts);
 	}
 }
 
-bs2pc_poly_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face) {
+bs2pc_subdiv_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face) {
 	const int *mapSurfedges = (const int *) BS2PC_GbxLump(LUMP_GBX_SURFEDGES);
 	const dedge_t *mapEdges = (const dedge_t *) BS2PC_GbxLump(LUMP_GBX_EDGES);
 	const dvertex_gbx_t *mapVertexes = (const dvertex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_VERTEXES), *mapVertex;
 	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) (bs2pc_gbxMap + face->miptex);
+	bs2pc_subdiv_t *subdiv;
 	float verts[64 * 3];
 	unsigned int numverts = 0;
 	unsigned int i;
 	int lindex;
+	const float *vecs = &face->vecs[0][0];
+	float scaleS = 1.0f / (float) texture->width, scaleT = 1.0f / (float) texture->height;
+	float offsetS, offsetT;
+	unsigned int subdivVertIndex;
+	bs2pc_polyvert_t *subdivVert;
 
 	for (i = 0; i < face->numedges; ++i) {
 		lindex = mapSurfedges[face->firstedge + i];
@@ -144,12 +163,28 @@ bs2pc_poly_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face) {
 		++numverts;
 	}
 
-	bs2pc_warptexvecs = &face->vecs[0][0];
-	bs2pc_warptexscale[0] = 1.0f / (float) texture->width;
-	bs2pc_warptexscale[1] = 1.0f / (float) texture->height;
-	bs2pc_warptexoffset[0] = (float) (int) ((BS2PC_DotProduct(verts, bs2pc_warptexvecs) + bs2pc_warptexvecs[3]) * bs2pc_warptexscale[0]);
-	bs2pc_warptexoffset[1] = (float) (int) ((BS2PC_DotProduct(verts, bs2pc_warptexvecs + 4) + bs2pc_warptexvecs[7]) * bs2pc_warptexscale[1]);
-	bs2pc_warppoly = NULL;
+	offsetS = (float) (int) ((BS2PC_DotProduct(verts, vecs) + vecs[3]) * scaleS);
+	offsetT = (float) (int) ((BS2PC_DotProduct(verts, vecs + 4) + vecs[7]) * scaleT);
+
+	bs2pc_warpPoly = NULL;
+	bs2pc_polyVertCount = 0;
 	BS2PC_SubdividePolygon(numverts, verts);
-	return bs2pc_warppoly;
+
+	subdiv = (bs2pc_subdiv_t *) BS2PC_Alloc(sizeof(bs2pc_subdiv_t), false);
+	subdiv->numverts = bs2pc_polyVertCount;
+	subdiv->verts = (bs2pc_polyvert_t *) BS2PC_Alloc(bs2pc_polyVertCount * sizeof(bs2pc_polyvert_t), false);
+	for (subdivVertIndex = 0, subdivVert = subdiv->verts; subdivVertIndex < bs2pc_polyVertCount; ++subdivVertIndex, ++subdivVert) {
+		const float *data = bs2pc_polyVertData[subdivVertIndex];
+		subdivVert->xyz[0] = data[0];
+		subdivVert->xyz[1] = data[1];
+		subdivVert->xyz[2] = data[2];
+		subdivVert->st[0] = (BS2PC_DotProduct(data, vecs) + vecs[3]) * scaleS - offsetS;
+		subdivVert->st[1] = (BS2PC_DotProduct(data, vecs + 4) + vecs[7]) * scaleT - offsetT;
+		// TODO: Numbers in the subdivision.
+		subdivVert->f = 0;
+		subdivVert->b = 0;
+		subdivVert->pad[0] = subdivVert->pad[1] = 0;
+	}
+	subdiv->poly = bs2pc_warpPoly;
+	return subdiv;
 }

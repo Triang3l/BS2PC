@@ -84,11 +84,17 @@ typedef struct {
 
 typedef struct bs2pc_poly_s {
 	struct bs2pc_poly_s *next;
-	unsigned int numverts;
-	bs2pc_polyvert_t verts[4]; // Variable sized.
+	unsigned int numindices;
+	unsigned int indices[4]; // Variable sized.
 } bs2pc_poly_t;
 
-bs2pc_poly_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face);
+typedef struct {
+	unsigned int numverts;
+	bs2pc_polyvert_t *verts;
+	bs2pc_poly_t *poly;
+} bs2pc_subdiv_t;
+
+bs2pc_subdiv_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face);
 
 // WAD texture management
 
