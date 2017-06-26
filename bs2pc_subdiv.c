@@ -3,14 +3,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static bs2pc_poly_t *bs2pc_warpPoly;
-
 static float bs2pc_subdivideSize;
 
 #define BS2PC_MAX_POLY_VERTS 1024
-static float bs2pc_polyVertData[BS2PC_MAX_POLY_VERTS][3];
+static float bs2pc_polyPositions[BS2PC_MAX_POLY_VERTS][3];
+#define BS2PC_POLY_POSITION_EPSILON 0.001f
 static unsigned int bs2pc_polyVertCount;
-#define BS2PC_POLY_VERT_EPSILON 0.001f
+
+#define BS2PC_MAX_POLY_TRIS BS2PC_MAX_POLY_VERTS
+static unsigned short bs2pc_polyTriIndices[3 * BS2PC_MAX_POLY_TRIS];
+static unsigned int bs2pc_polyTriCount;
+
+#define BS2PC_MAX_POLY_STRIP_INDICES BS2PC_MAX_POLY_VERTS
+#define BS2PC_MAX_POLY_STRIPS 256
+static unsigned short bs2pc_polyStripIndices[BS2PC_MAX_POLY_STRIP_INDICES];
+static unsigned int bs2pc_polyStripIndexCount;
+static unsigned int bs2pc_polyStrips[BS2PC_MAX_POLY_STRIPS][2];
+static unsigned int bs2pc_polyStripCount;
 
 static void BS2PC_BoundPoly(unsigned int numverts, float *verts, float mins[3], float maxs[3]) {
 	unsigned int i, j;
@@ -34,10 +43,10 @@ static void BS2PC_BoundPoly(unsigned int numverts, float *verts, float mins[3], 
 static unsigned int BS2PC_AddPolyVertex(float vert[3]) {
 	unsigned int vertIndex;
 	float *otherVert;
-	for (vertIndex = 0, otherVert = &bs2pc_polyVertData[0][0]; vertIndex < bs2pc_polyVertCount; ++vertIndex, otherVert += 3) {
-		if (fabsf(vert[0] - otherVert[0]) <= BS2PC_POLY_VERT_EPSILON &&
-				fabsf(vert[1] - otherVert[1]) <= BS2PC_POLY_VERT_EPSILON &&
-				fabsf(vert[2] - otherVert[2]) <= BS2PC_POLY_VERT_EPSILON) {
+	for (vertIndex = 0, otherVert = &bs2pc_polyPositions[0][0]; vertIndex < bs2pc_polyVertCount; ++vertIndex, otherVert += 3) {
+		if (fabsf(vert[0] - otherVert[0]) <= BS2PC_POLY_POSITION_EPSILON &&
+				fabsf(vert[1] - otherVert[1]) <= BS2PC_POLY_POSITION_EPSILON &&
+				fabsf(vert[2] - otherVert[2]) <= BS2PC_POLY_POSITION_EPSILON) {
 			return vertIndex;
 		}
 	}
@@ -60,7 +69,7 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	unsigned int f, b;
 	float dist[64];
 	float frac;
-	bs2pc_poly_t *poly;
+	unsigned short *triIndices, triFirstIndex, triPrevIndex;
 
 	if (numverts > 60) {
 		fputs("Too many vertices in a face subdivision step\n.", stderr);
@@ -124,31 +133,50 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 		BS2PC_SubdividePolygon(b, back);
 	}
 
-	poly = (bs2pc_poly_t *) BS2PC_Alloc(sizeof(bs2pc_poly_t) + (numverts - 4) * sizeof(unsigned int), false);
-	poly->next = bs2pc_warpPoly;
-	bs2pc_warpPoly = poly;
-	poly->numindices = numverts;
-	for (i = 0; i < numverts; ++i, verts += 3) {
-		poly->indices[i] = BS2PC_AddPolyVertex(verts);
+	if (numverts < 3) {
+		// Shouldn't happen, but still.
+		return;
 	}
+
+	if (bs2pc_polyTriCount + (numverts - 2) > BS2PC_MAX_POLY_TRIS) {
+		fputs("Too many triangles after face subdivision.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	triIndices = &bs2pc_polyTriIndices[3 * bs2pc_polyTriCount];
+	triFirstIndex = BS2PC_AddPolyVertex(verts);
+	triPrevIndex = BS2PC_AddPolyVertex(verts + 3);
+	verts += 6;
+	for (i = 2; i < numverts; ++i, verts += 3) {
+		*(triIndices++) = triFirstIndex;
+		*(triIndices++) = triPrevIndex;
+		triPrevIndex = BS2PC_AddPolyVertex(verts);
+		*(triIndices++) = triPrevIndex;
+	}
+	bs2pc_polyTriCount += numverts - 2;
 }
 
-bs2pc_subdiv_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face) {
+unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *outSize) {
+	const dface_gbx_t *face = ((const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES)) + faceIndex;
 	const int *mapSurfedges = (const int *) BS2PC_GbxLump(LUMP_GBX_SURFEDGES);
 	const dedge_t *mapEdges = (const dedge_t *) BS2PC_GbxLump(LUMP_GBX_EDGES);
 	const dvertex_gbx_t *mapVertexes = (const dvertex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_VERTEXES), *mapVertex;
 	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) (bs2pc_gbxMap + face->miptex);
-	bs2pc_subdiv_t *subdiv;
+
 	float verts[64 * 3];
 	unsigned int numverts = 0;
 	unsigned int i;
 	int lindex;
 	const float *vecs = &face->vecs[0][0];
+
 	float scaleS = 1.0f / (float) texture->width, scaleT = 1.0f / (float) texture->height;
 	float offsetS, offsetT;
 	float textureMinS, textureMinT;
+
+	unsigned int subdivSize;
+	unsigned char *subdiv;
+	unsigned int subdivPosition;
 	unsigned int subdivVertIndex;
-	bs2pc_polyvert_t *subdivVert;
+	unsigned int subdivTriIndex;
 
 	for (i = 0; i < face->numedges; ++i) {
 		lindex = mapSurfedges[face->firstedge + i];
@@ -168,28 +196,50 @@ bs2pc_subdiv_t *BS2PC_SubdivideGbxSurface(const dface_gbx_t *face) {
 	textureMinS = (float) face->texturemins[0];
 	textureMinT = (float) face->texturemins[1];
 
-	bs2pc_warpPoly = NULL;
 	bs2pc_subdivideSize = ((face->flags & SURF_DRAWTURB) ? 64.0f : 32.0f);
 	bs2pc_polyVertCount = 0;
+	bs2pc_polyTriCount = 0;
 	BS2PC_SubdividePolygon(numverts, verts);
 
-	subdiv = (bs2pc_subdiv_t *) BS2PC_Alloc(sizeof(bs2pc_subdiv_t), false);
-	subdiv->numverts = bs2pc_polyVertCount;
-	subdiv->verts = (bs2pc_polyvert_t *) BS2PC_Alloc(bs2pc_polyVertCount * sizeof(bs2pc_polyvert_t), false);
-	for (subdivVertIndex = 0, subdivVert = subdiv->verts; subdivVertIndex < bs2pc_polyVertCount; ++subdivVertIndex, ++subdivVert) {
-		const float *data = bs2pc_polyVertData[subdivVertIndex];
+	subdivSize = 2 * sizeof(unsigned int) /* face index, vertex count */ + bs2pc_polyVertCount * sizeof(bs2pc_polyvert_t) + sizeof(unsigned int) /* mesh count */;
+	subdivSize += bs2pc_polyTriCount * 8; // TODO: Strips.
+
+	subdiv = (unsigned char *) BS2PC_Alloc(subdivSize, false);
+	*((unsigned int *) subdiv) = faceIndex;
+	*((unsigned int *) subdiv + 1) = bs2pc_polyVertCount;
+	subdivPosition = 2 * sizeof(unsigned int);
+
+	for (subdivVertIndex = 0; subdivVertIndex < bs2pc_polyVertCount; ++subdivVertIndex) {
+		bs2pc_polyvert_t *subdivVert = (bs2pc_polyvert_t *) (subdiv + subdivPosition);
+		const float *position = bs2pc_polyPositions[subdivVertIndex];
 		float s, t;
-		subdivVert->xyz[0] = data[0];
-		subdivVert->xyz[1] = data[1];
-		subdivVert->xyz[2] = data[2];
-		s = BS2PC_DotProduct(data, vecs) + vecs[3];
-		t = BS2PC_DotProduct(data, vecs + 4) + vecs[7];
+		subdivVert->xyz[0] = position[0];
+		subdivVert->xyz[1] = position[1];
+		subdivVert->xyz[2] = position[2];
+		s = BS2PC_DotProduct(position, vecs) + vecs[3];
+		t = BS2PC_DotProduct(position, vecs + 4) + vecs[7];
 		subdivVert->st[0] = s * scaleS - offsetS;
 		subdivVert->st[1] = t * scaleT - offsetT;
 		subdivVert->stoffset[0] = (unsigned char) ((s - textureMinS) * (1.0f / 16.0f) + 0.5f);
 		subdivVert->stoffset[1] = (unsigned char) ((t - textureMinT) * (1.0f / 16.0f) + 0.5f);
 		subdivVert->pad[0] = subdivVert->pad[1] = 0;
+		subdivPosition += sizeof(bs2pc_polyvert_t);
 	}
-	subdiv->poly = bs2pc_warpPoly;
+
+	*((unsigned int *) (subdiv + subdivPosition)) = bs2pc_polyTriCount;
+	subdivPosition += sizeof(unsigned int);
+
+	// TODO: Strips.
+	for (subdivTriIndex = 0; subdivTriIndex < bs2pc_polyTriCount; ++subdivTriIndex) {
+		*((unsigned short *) (subdiv + subdivPosition)) = 3;
+		*((unsigned short *) (subdiv + subdivPosition) + 1) = bs2pc_polyTriIndices[subdivTriIndex * 3];
+		*((unsigned short *) (subdiv + subdivPosition) + 2) = bs2pc_polyTriIndices[subdivTriIndex * 3 + 1];
+		*((unsigned short *) (subdiv + subdivPosition) + 3) = bs2pc_polyTriIndices[subdivTriIndex * 3 + 2];
+		subdivPosition += 4 * sizeof(unsigned short);
+	}
+
+	if (outSize != NULL) {
+		*outSize = subdivSize;
+	}
 	return subdiv;
 }
