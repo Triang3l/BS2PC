@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static float bs2pc_subdivideSize;
 
@@ -11,7 +12,8 @@ static float bs2pc_polyPositions[BS2PC_MAX_POLY_VERTS][3];
 static unsigned int bs2pc_polyVertCount;
 
 #define BS2PC_MAX_POLY_TRIS BS2PC_MAX_POLY_VERTS
-static unsigned short bs2pc_polyTriIndices[3 * BS2PC_MAX_POLY_TRIS];
+static unsigned short bs2pc_polyTris[BS2PC_MAX_POLY_TRIS][3];
+static unsigned char bs2pc_polyTrisUsed[BS2PC_MAX_POLY_TRIS];
 static unsigned int bs2pc_polyTriCount;
 
 #define BS2PC_MAX_POLY_STRIP_INDICES BS2PC_MAX_POLY_VERTS
@@ -20,6 +22,10 @@ static unsigned short bs2pc_polyStripIndices[BS2PC_MAX_POLY_STRIP_INDICES];
 static unsigned int bs2pc_polyStripIndexCount;
 static unsigned int bs2pc_polyStrips[BS2PC_MAX_POLY_STRIPS][2];
 static unsigned int bs2pc_polyStripCount;
+
+static unsigned short bs2pc_polyCurrentStripIndices[BS2PC_MAX_POLY_STRIP_INDICES];
+static unsigned short bs2pc_polyCurrentStripTris[BS2PC_MAX_POLY_STRIP_INDICES];
+static unsigned int bs2pc_polyCurrentStripLength;
 
 static void BS2PC_BoundPoly(unsigned int numverts, float *verts, float mins[3], float maxs[3]) {
 	unsigned int i, j;
@@ -143,7 +149,7 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 		fputs("Too many triangles after face subdivision.\n", stderr);
 		exit(EXIT_FAILURE);
 	}
-	triIndices = &bs2pc_polyTriIndices[3 * bs2pc_polyTriCount];
+	triIndices = bs2pc_polyTris[bs2pc_polyTriCount];
 	triFirstIndex = BS2PC_AddPolyVertex(verts);
 	triPrevIndex = BS2PC_AddPolyVertex(verts + 3);
 	verts += 6;
@@ -154,6 +160,100 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 		*(triIndices++) = triPrevIndex;
 	}
 	bs2pc_polyTriCount += numverts - 2;
+}
+
+static void BS2PC_BuildStrip(unsigned int starttri, unsigned int startv) {
+	unsigned int m1, m2;
+	unsigned int j;
+	const unsigned short *check;
+	unsigned int k;
+	unsigned int newvert;
+
+	bs2pc_polyTrisUsed[starttri] = 2;
+
+	check = bs2pc_polyTris[starttri];
+	bs2pc_polyCurrentStripIndices[0] = check[startv % 3];
+	bs2pc_polyCurrentStripIndices[1] = m2 = check[(startv + 1) % 3];
+	bs2pc_polyCurrentStripIndices[2] = m1 = check[(startv + 2) % 3];
+
+	bs2pc_polyCurrentStripTris[0] = starttri;
+	bs2pc_polyCurrentStripLength = 1;
+
+nexttri:
+	for (j = starttri + 1; j < bs2pc_polyTriCount; ++j) {
+		check = bs2pc_polyTris[j];
+		for (k = 0; k < 3; ++k) {
+			if (check[k] != m1) {
+				continue;
+			}
+			if (check[(k + 1) % 3] != m2) {
+				continue;
+			}
+
+			if (bs2pc_polyTrisUsed[j]) {
+				goto done;
+			}
+
+			newvert = check[(k + 2) % 3];
+			if (bs2pc_polyCurrentStripLength & 1) {
+				m2 = newvert;
+			} else {
+				m1 = newvert;
+			}
+
+			bs2pc_polyCurrentStripIndices[bs2pc_polyCurrentStripLength + 2] = newvert;
+			bs2pc_polyCurrentStripTris[bs2pc_polyCurrentStripLength] = j;
+			++bs2pc_polyCurrentStripLength;
+
+			bs2pc_polyTrisUsed[j] = 2;
+			goto nexttri;
+		}
+	}
+
+done:
+	for (j = starttri + 1; j < bs2pc_polyTriCount; ++j) {
+		if (bs2pc_polyTrisUsed[j] == 2) {
+			bs2pc_polyTrisUsed[j] = 0;
+		}
+	}
+}
+
+static void BS2PC_BuildStrips() {
+	unsigned int i, j;
+	unsigned int startv;
+	unsigned int bestlen;
+	unsigned short bestindices[BS2PC_MAX_POLY_STRIP_INDICES];
+	unsigned short besttris[BS2PC_MAX_POLY_STRIP_INDICES];
+
+	memset(bs2pc_polyTrisUsed, 0, bs2pc_polyTriCount);
+	for (i = 0; i < bs2pc_polyTriCount; ++i) {
+		if (bs2pc_polyTrisUsed[i]) {
+			continue;
+		}
+
+		bestlen = 0;
+		for (startv = 0; startv < 3; ++startv) {
+			BS2PC_BuildStrip(i, startv);
+			if (bs2pc_polyCurrentStripLength > bestlen) {
+				bestlen = bs2pc_polyCurrentStripLength;
+				memcpy(bestindices, bs2pc_polyCurrentStripIndices, (bestlen + 2) * sizeof(unsigned short));
+				memcpy(besttris, bs2pc_polyCurrentStripTris, bestlen * sizeof(unsigned short));
+			}
+		}
+
+		for (j = 0; j < bestlen; ++j) {
+			bs2pc_polyTrisUsed[besttris[j]] = 1;
+		}
+
+		printf("%sbestlen = %u\n", bestlen != 0 ? "!!! " : "", bestlen);
+
+		bs2pc_polyStrips[bs2pc_polyStripCount][0] = bs2pc_polyStripIndexCount;
+		bs2pc_polyStrips[bs2pc_polyStripCount][1] = bestlen + 2;
+		++bs2pc_polyStripCount;
+		for (j = 0; j < bestlen + 2; ++j) {
+			bs2pc_polyStripIndices[bs2pc_polyStripIndexCount++] = bestindices[j];
+		}
+	}
 }
 
 unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *outSize) {
@@ -177,7 +277,7 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	unsigned char *subdiv;
 	unsigned int subdivPosition;
 	unsigned int subdivVertIndex;
-	unsigned int subdivTriIndex;
+	unsigned int subdivStripIndex, subdivStripVertexCount;
 
 	for (i = 0; i < face->numedges; ++i) {
 		lindex = mapSurfedges[face->firstedge + i];
@@ -200,10 +300,18 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	bs2pc_subdivideSize = ((face->flags & SURF_DRAWTURB) ? 64.0f : 32.0f);
 	bs2pc_polyVertCount = 0;
 	bs2pc_polyTriCount = 0;
+	bs2pc_polyStripIndexCount = 0;
+	bs2pc_polyStripCount = 0;
 	BS2PC_SubdividePolygon(numverts, verts);
+	BS2PC_BuildStrips();
 
 	subdivSize = 2 * sizeof(unsigned int) /* face index, vertex count */ + bs2pc_polyVertCount * sizeof(bs2pc_polyvert_t) + sizeof(unsigned int) /* mesh count */;
-	subdivSize += bs2pc_polyTriCount * 8; // TODO: Strips.
+	for (subdivStripIndex = 0; subdivStripIndex < bs2pc_polyStripCount; ++subdivStripIndex) {
+		subdivSize += (1 + bs2pc_polyStrips[subdivStripIndex][1]) * sizeof(unsigned short);
+		if (subdivSize & 3) {
+			subdivSize += sizeof(unsigned short);
+		}
+	}
 
 	subdiv = (unsigned char *) BS2PC_Alloc(subdivSize, false);
 	*((unsigned int *) subdiv) = faceIndex;
@@ -227,16 +335,20 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 		subdivPosition += sizeof(bs2pc_polyvert_t);
 	}
 
-	*((unsigned int *) (subdiv + subdivPosition)) = bs2pc_polyTriCount;
+	*((unsigned int *) (subdiv + subdivPosition)) = bs2pc_polyStripCount;
 	subdivPosition += sizeof(unsigned int);
-
-	// TODO: Strips.
-	for (subdivTriIndex = 0; subdivTriIndex < bs2pc_polyTriCount; ++subdivTriIndex) {
-		*((unsigned short *) (subdiv + subdivPosition)) = 3;
-		*((unsigned short *) (subdiv + subdivPosition) + 1) = bs2pc_polyTriIndices[subdivTriIndex * 3];
-		*((unsigned short *) (subdiv + subdivPosition) + 2) = bs2pc_polyTriIndices[subdivTriIndex * 3 + 1];
-		*((unsigned short *) (subdiv + subdivPosition) + 3) = bs2pc_polyTriIndices[subdivTriIndex * 3 + 2];
-		subdivPosition += 4 * sizeof(unsigned short);
+	
+	for (subdivStripIndex = 0; subdivStripIndex < bs2pc_polyStripCount; ++subdivStripIndex) {
+		subdivStripVertexCount = bs2pc_polyStrips[subdivStripIndex][1];
+		*((unsigned short *) (subdiv + subdivPosition)) = subdivStripVertexCount;
+		subdivPosition += sizeof(unsigned short);
+		memcpy(subdiv + subdivPosition, &bs2pc_polyStripIndices[bs2pc_polyStrips[subdivStripIndex][0]],
+				subdivStripVertexCount * sizeof(unsigned short));
+		subdivPosition += subdivStripVertexCount * sizeof(unsigned short);
+		if (subdivPosition & 3) {
+			*((unsigned short *) (subdiv + subdivPosition)) = /*cov*/0xfefe;
+			subdivPosition += sizeof(unsigned short);
+		}
 	}
 
 	if (outSize != NULL) {
