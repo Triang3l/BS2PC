@@ -131,6 +131,7 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 
 		BS2PC_SubdividePolygon(f, front);
 		BS2PC_SubdividePolygon(b, back);
+		return;
 	}
 
 	if (numverts < 3) {
