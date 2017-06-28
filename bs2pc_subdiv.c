@@ -1,5 +1,6 @@
 #include "bs2pc.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,10 +19,14 @@ static unsigned int bs2pc_polyTriCount;
 
 #define BS2PC_MAX_POLY_STRIP_INDICES BS2PC_MAX_POLY_VERTS
 #define BS2PC_MAX_POLY_STRIPS 256
-static unsigned short bs2pc_polyStripIndices[BS2PC_MAX_POLY_STRIP_INDICES];
-static unsigned int bs2pc_polyStripIndexCount;
-static unsigned int bs2pc_polyStrips[BS2PC_MAX_POLY_STRIPS][2];
-static unsigned int bs2pc_polyStripCount;
+typedef struct {
+	unsigned short indices[BS2PC_MAX_POLY_STRIP_INDICES];
+	unsigned int indexCount;
+	unsigned int strips[BS2PC_MAX_POLY_STRIPS][2];
+	unsigned int stripCount;
+} bs2pc_polyStripSet_t;
+static bs2pc_polyStripSet_t bs2pc_polyStripSets[2];
+static unsigned int bs2pc_currentPolyStripSet;
 
 static unsigned short bs2pc_polyCurrentStripIndices[BS2PC_MAX_POLY_STRIP_INDICES];
 static unsigned short bs2pc_polyCurrentStripTris[BS2PC_MAX_POLY_STRIP_INDICES];
@@ -225,6 +230,11 @@ static void BS2PC_BuildStrips() {
 	unsigned int bestlen;
 	unsigned short bestindices[BS2PC_MAX_POLY_STRIP_INDICES];
 	unsigned short besttris[BS2PC_MAX_POLY_STRIP_INDICES];
+	bs2pc_polyStripSet_t *set = &bs2pc_polyStripSets[0];
+
+	bs2pc_currentPolyStripSet = 0;
+	set->indexCount = 0;
+	set->stripCount = 0;
 
 	memset(bs2pc_polyTrisUsed, 0, bs2pc_polyTriCount);
 	for (i = 0; i < bs2pc_polyTriCount; ++i) {
@@ -243,17 +253,82 @@ static void BS2PC_BuildStrips() {
 		}
 
 		for (j = 0; j < bestlen; ++j) {
-			bs2pc_polyTrisUsed[besttris[j]] = 1;
+			if (besttris[j] != USHRT_MAX) {
+				bs2pc_polyTrisUsed[besttris[j]] = 1;
+			}
 		}
 
-		printf("%sbestlen = %u\n", bestlen != 0 ? "!!! " : "", bestlen);
-
-		bs2pc_polyStrips[bs2pc_polyStripCount][0] = bs2pc_polyStripIndexCount;
-		bs2pc_polyStrips[bs2pc_polyStripCount][1] = bestlen + 2;
-		++bs2pc_polyStripCount;
+		set->strips[set->stripCount][0] = set->indexCount;
+		set->strips[set->stripCount][1] = bestlen + 2;
+		++set->stripCount;
 		for (j = 0; j < bestlen + 2; ++j) {
-			bs2pc_polyStripIndices[bs2pc_polyStripIndexCount++] = bestindices[j];
+			set->indices[set->indexCount++] = bestindices[j];
 		}
+	}
+}
+
+static void BS2PC_MergeStrips() {
+	bool merge;
+	const bs2pc_polyStripSet_t *setSource;
+	bs2pc_polyStripSet_t *setTarget;
+	const unsigned short *indicesSource;
+	unsigned short *indicesTarget;
+	unsigned int stripIndexTo = 0, stripIndexFrom = 0, stripIndex;
+	const unsigned int *stripTo = NULL, *stripFrom = NULL, *stripSource;
+	unsigned int *stripTarget;
+
+	while (true) {
+		merge = false;
+
+		// Find two strips to merge.
+		setSource = &bs2pc_polyStripSets[bs2pc_currentPolyStripSet];
+		indicesSource = setSource->indices;
+		for (stripIndexTo = 0; stripIndexTo < setSource->stripCount; ++stripIndexTo) {
+			stripTo = &setSource->strips[stripIndexTo][0];
+			for (stripIndexFrom = 0; stripIndexFrom < setSource->stripCount; ++stripIndexFrom) {
+				if (stripIndexFrom == stripIndexTo) {
+					continue;
+				}
+				stripFrom = &setSource->strips[stripIndexFrom][0];
+				if (indicesSource[stripTo[0] + stripTo[1] - 3] == indicesSource[stripFrom[0]] &&
+						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 1]) {
+					merge = true;
+					break;
+				}
+			}
+			if (merge) {
+				break;
+			}
+		}
+
+		if (!merge) {
+			break;
+		}
+
+		// Write the new strips to the set.
+		setTarget = &bs2pc_polyStripSets[bs2pc_currentPolyStripSet ^ 1];
+		setTarget->indexCount = setTarget->stripCount = 0;
+		for (stripIndex = 0; stripIndex < setSource->stripCount; ++stripIndex) {
+			if (stripIndex == stripIndexFrom) {
+				continue;
+			}
+			stripSource = &setSource->strips[stripIndex][0];
+			indicesSource = &setSource->indices[0];
+			stripTarget = &setTarget->strips[setTarget->stripCount][0];
+			stripTarget[0] = setTarget->indexCount;
+			indicesTarget = &setTarget->indices[stripTarget[0]];
+			if (stripIndex == stripIndexTo) {
+				memcpy(indicesTarget, &indicesSource[stripTo[0]], (stripTo[1] - 1) * sizeof(unsigned short));
+				memcpy(&indicesTarget[stripTo[1] - 1], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
+				stripTarget[1] = stripTo[1] - 1 + stripFrom[1];
+			} else {
+				memcpy(indicesTarget, &indicesSource[stripSource[0]], stripSource[1] * sizeof(unsigned short));
+				stripTarget[1] = stripSource[1];
+			}
+			setTarget->indexCount += stripTarget[1];
+			++setTarget->stripCount;
+		}
+		bs2pc_currentPolyStripSet ^= 1;
 	}
 }
 
@@ -274,6 +349,7 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	float offsetS, offsetT;
 	float textureMinS, textureMinT;
 
+	bs2pc_polyStripSet_t *stripSet;
 	unsigned int subdivSize;
 	unsigned char *subdiv;
 	unsigned int subdivPosition;
@@ -301,14 +377,14 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	bs2pc_subdivideSize = ((face->flags & SURF_DRAWTURB) ? 64.0f : 32.0f);
 	bs2pc_polyVertCount = 0;
 	bs2pc_polyTriCount = 0;
-	bs2pc_polyStripIndexCount = 0;
-	bs2pc_polyStripCount = 0;
 	BS2PC_SubdividePolygon(numverts, verts);
 	BS2PC_BuildStrips();
+	BS2PC_MergeStrips();
+	stripSet = &bs2pc_polyStripSets[bs2pc_currentPolyStripSet];
 
 	subdivSize = 2 * sizeof(unsigned int) /* face index, vertex count */ + bs2pc_polyVertCount * sizeof(bs2pc_polyvert_t) + sizeof(unsigned int) /* mesh count */;
-	for (subdivStripIndex = 0; subdivStripIndex < bs2pc_polyStripCount; ++subdivStripIndex) {
-		subdivSize += (1 + bs2pc_polyStrips[subdivStripIndex][1]) * sizeof(unsigned short);
+	for (subdivStripIndex = 0; subdivStripIndex < stripSet->stripCount; ++subdivStripIndex) {
+		subdivSize += (1 + stripSet->strips[subdivStripIndex][1]) * sizeof(unsigned short);
 		if (subdivSize & 3) {
 			subdivSize += sizeof(unsigned short);
 		}
@@ -336,14 +412,14 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 		subdivPosition += sizeof(bs2pc_polyvert_t);
 	}
 
-	*((unsigned int *) (subdiv + subdivPosition)) = bs2pc_polyStripCount;
+	*((unsigned int *) (subdiv + subdivPosition)) = stripSet->stripCount;
 	subdivPosition += sizeof(unsigned int);
 	
-	for (subdivStripIndex = 0; subdivStripIndex < bs2pc_polyStripCount; ++subdivStripIndex) {
-		subdivStripVertexCount = bs2pc_polyStrips[subdivStripIndex][1];
+	for (subdivStripIndex = 0; subdivStripIndex < stripSet->stripCount; ++subdivStripIndex) {
+		subdivStripVertexCount = stripSet->strips[subdivStripIndex][1];
 		*((unsigned short *) (subdiv + subdivPosition)) = subdivStripVertexCount;
 		subdivPosition += sizeof(unsigned short);
-		memcpy(subdiv + subdivPosition, &bs2pc_polyStripIndices[bs2pc_polyStrips[subdivStripIndex][0]],
+		memcpy(subdiv + subdivPosition, &stripSet->indices[stripSet->strips[subdivStripIndex][0]],
 				subdivStripVertexCount * sizeof(unsigned short));
 		subdivPosition += subdivStripVertexCount * sizeof(unsigned short);
 		if (subdivPosition & 3) {
