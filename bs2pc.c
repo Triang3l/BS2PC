@@ -68,11 +68,17 @@ int main(int argc, const char * const *argv) {
 	beginning = *((const unsigned int *) sourceFile);
 
 	if (beginning == BSPVERSION_ID) {
+		void *targetFile;
+		unsigned int targetFileSize;
+
 		bs2pc_idMapSize = sourceFileSize;
 		bs2pc_idMap = sourceFile;
 
-		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision and compression are missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
+		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision is missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
 		BS2PC_ConvertIdToGbx();
+
+		fputs("Compressing .bs2...\n", stderr);
+		targetFile = BS2PC_CompressWithSize(bs2pc_gbxMap, bs2pc_gbxMapSize, &targetFileSize);
 
 		fputs("Writing the .bs2 file...\n", stderr);
 		if (targetFileName == NULL) {
@@ -86,7 +92,7 @@ int main(int argc, const char * const *argv) {
 			}
 			targetFileName = targetFileNameBuffer;
 		}
-		BS2PC_WriteFile(targetFileName, bs2pc_gbxMap, bs2pc_gbxMapSize);
+		BS2PC_WriteFile(targetFileName, targetFile, targetFileSize);
 
 		fprintf(stderr, "%s converted to %s.\n", sourceFileName, targetFileName);
 	} else {

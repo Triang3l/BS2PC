@@ -99,6 +99,14 @@ typedef int (BS2PC_ZLIB_IMPORT *bs2pc_zlib_inflate_t)(z_streamp strm, int flush)
 static bs2pc_zlib_inflate_t bs2pc_zlib_inflate;
 typedef int (BS2PC_ZLIB_IMPORT *bs2pc_zlib_inflateEnd_t)(z_streamp strm);
 static bs2pc_zlib_inflateEnd_t bs2pc_zlib_inflateEnd;
+typedef int (BS2PC_ZLIB_IMPORT *bs2pc_zlib_deflateInit__t)(z_streamp strm, int level, const char *version, int stream_size);
+static bs2pc_zlib_deflateInit__t bs2pc_zlib_deflateInit_;
+typedef uLong (BS2PC_ZLIB_IMPORT *bs2pc_zlib_deflateBound_t)(z_streamp strm, uLong sourceLen);
+static bs2pc_zlib_deflateBound_t bs2pc_zlib_deflateBound;
+typedef int (BS2PC_ZLIB_IMPORT *bs2pc_zlib_deflate_t)(z_streamp strm, int flush);
+static bs2pc_zlib_deflate_t bs2pc_zlib_deflate;
+typedef int (BS2PC_ZLIB_IMPORT *bs2pc_zlib_deflateEnd_t)(z_streamp strm);
+static bs2pc_zlib_deflateEnd_t bs2pc_zlib_deflateEnd;
 
 void BS2PC_InitializeZlib() {
 	#ifdef _WIN32
@@ -118,11 +126,17 @@ void BS2PC_InitializeZlib() {
 	bs2pc_zlib_inflateInit_ = (bs2pc_zlib_inflateInit__t) GetProcAddress(module, "inflateInit_");
 	bs2pc_zlib_inflate = (bs2pc_zlib_inflate_t) GetProcAddress(module, "inflate");
 	bs2pc_zlib_inflateEnd = (bs2pc_zlib_inflateEnd_t) GetProcAddress(module, "inflateEnd");
+	bs2pc_zlib_deflateInit_ = (bs2pc_zlib_deflateInit__t) GetProcAddress(module, "deflateInit_");
+	bs2pc_zlib_deflateBound = (bs2pc_zlib_deflateBound_t) GetProcAddress(module, "deflateBound");
+	bs2pc_zlib_deflate = (bs2pc_zlib_deflate_t) GetProcAddress(module, "deflate");
+	bs2pc_zlib_deflateEnd = (bs2pc_zlib_deflateEnd_t) GetProcAddress(module, "deflateEnd");
 	#else
 	#error No zlib loading code for this platform.
 	#endif
 
-	if (bs2pc_zlib_inflateInit_ == NULL || bs2pc_zlib_inflate == NULL || bs2pc_zlib_inflateEnd == NULL) {
+	if (bs2pc_zlib_inflateInit_ == NULL || bs2pc_zlib_inflate == NULL || bs2pc_zlib_inflateEnd == NULL ||
+			bs2pc_zlib_deflateInit_ == NULL || bs2pc_zlib_deflateBound == NULL ||
+			bs2pc_zlib_deflate == NULL || bs2pc_zlib_deflateEnd == NULL) {
 		fputs("Couldn't get a zlib function.\n", stderr);
 		exit(EXIT_FAILURE);
 	}
@@ -135,9 +149,7 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 
 	BS2PC_InitializeZlib();
 
-	stream.zalloc = Z_NULL;
-	stream.zfree = Z_NULL;
-	stream.opaque = Z_NULL;
+	memset(&stream, 0, sizeof(stream));
 	stream.avail_in = sourceSize;
 	stream.next_in = (Bytef *) source;
 	stream.avail_out = targetSize;
@@ -146,11 +158,42 @@ void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target,
 		fputs("Couldn't initialize decompression.\n", stderr);
 		exit(EXIT_FAILURE);
 	}
-	if (bs2pc_zlib_inflate(&stream, Z_NO_FLUSH) != Z_STREAM_END) {
+	if (bs2pc_zlib_inflate(&stream, Z_FINISH) != Z_STREAM_END) {
 		fputs("Couldn't decompress the data.\n", stderr);
 		exit(EXIT_FAILURE);
 	}
 	bs2pc_zlib_inflateEnd(&stream);
+}
+
+void *BS2PC_CompressWithSize(const void *source, unsigned int sourceSize, unsigned int *outTargetSize) {
+	z_stream stream;
+	unsigned int targetSize;
+	void *target;
+
+	BS2PC_InitializeZlib();
+	
+	memset(&stream, 0, sizeof(stream));
+	stream.avail_in = sourceSize;
+	stream.next_in = (Bytef *) source;
+	if (bs2pc_zlib_deflateInit_(&stream, Z_BEST_COMPRESSION, ZLIB_VERSION, sizeof(stream)) != Z_OK) {
+		fputs("Couldn't initialize compression.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	targetSize = bs2pc_zlib_deflateBound(&stream, sourceSize);
+	target = BS2PC_Alloc(targetSize + sizeof(unsigned int), false);
+	*((unsigned int *) target) = sourceSize;
+	stream.avail_out = targetSize;
+	stream.next_out = (Bytef *) ((char *) target + sizeof(unsigned int));
+	if (bs2pc_zlib_deflate(&stream, Z_FINISH) != Z_STREAM_END) {
+		fputs("Couldn't compress the data.\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	targetSize -= stream.avail_out;
+	bs2pc_zlib_deflateEnd(&stream);
+	if (outTargetSize != NULL) {
+		*outTargetSize = targetSize + sizeof(unsigned int);
+	}
+	return target;
 }
 
 // GL_Resample8BitTexture from Quake.

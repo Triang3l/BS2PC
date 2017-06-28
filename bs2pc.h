@@ -24,6 +24,7 @@ void *BS2PC_LoadFile(const char *fileName, unsigned int *fileSize);
 void BS2PC_WriteFile(const char *fileName, void *data, unsigned int size);
 
 void BS2PC_Decompress(const void *source, unsigned int sourceSize, void *target, unsigned int targetSize);
+void *BS2PC_CompressWithSize(const void *source, unsigned int sourceSize, unsigned int *outTargetSize);
 
 void BS2PC_ResampleTexture(const unsigned char *in, int inwidth, int inheight, unsigned char *out, int outwidth, int outheight);
 
