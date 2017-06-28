@@ -154,8 +154,9 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	triPrevIndex = BS2PC_AddPolyVertex(verts + 3);
 	verts += 6;
 	for (i = 2; i < numverts; ++i, verts += 3) {
-		*(triIndices++) = triFirstIndex;
+		// CW on PC, CCW on PS2, so 0 and 1 are swapped.
 		*(triIndices++) = triPrevIndex;
+		*(triIndices++) = triFirstIndex;
 		triPrevIndex = BS2PC_AddPolyVertex(verts);
 		*(triIndices++) = triPrevIndex;
 	}
