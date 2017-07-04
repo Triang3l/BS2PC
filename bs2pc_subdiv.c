@@ -295,14 +295,26 @@ static void BS2PC_MergeStrips() {
 						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 1]) {
 					// Found on c0a0e, face 1346.
 					mergeType = 1;
-				} else if (indicesSource[stripTo[0] + stripTo[1] - 2] == indicesSource[stripFrom[0] + stripFrom[1] - 3] &&
-						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
-					// c0a0e 1474.
+				} else if (indicesSource[stripTo[0] + stripTo[1] - 3] == indicesSource[stripFrom[0]] &&
+						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 2]) {
+					// c0a0e 1420.
 					mergeType = 2;
+				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + stripFrom[1] - 2] &&
+						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
+					// c0a0e 1420.
+					mergeType = 3;
+				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + 2] &&
+						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0]]) {
+					// c0a0e 1420.
+					mergeType = 4;
 				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + 1] &&
 						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0]]) {
 					// c1a0 3118.
-					mergeType = 3;
+					mergeType = 5;
+				} else if (indicesSource[stripTo[0] + stripTo[1] - 2] == indicesSource[stripFrom[0] + stripFrom[1] - 3] &&
+						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
+					// c0a0e 1474 - degenerate.
+					mergeType = 6;
 				}
 				if (mergeType != 0) {
 					break;
@@ -335,19 +347,42 @@ static void BS2PC_MergeStrips() {
 					memcpy(&indicesTarget[stripTo[1] - 1], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
 					stripTarget[1] = stripTo[1] - 1 + stripFrom[1];
 				} else if (mergeType == 2) {
-					memcpy(indicesTarget, &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
-					indicesTarget[stripTo[1]] = indicesSource[stripFrom[0] + stripFrom[1] - 3];
-					indicesTarget[stripTo[1] + 1] = indicesSource[stripFrom[0] + stripFrom[1] - 2];
-					for (vertexIndex = 0; vertexIndex < stripTo[1] - 3; ++vertexIndex) {
-						indicesTarget[stripTo[1] + 2 + vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 4 - vertexIndex];
+					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
+						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
 					}
-					stripTarget[1] = stripTo[1] + stripFrom[1] - 1;
+					indicesTarget[stripFrom[1] - 3] = indicesSource[stripFrom[0] + 1];
+					indicesTarget[stripFrom[1] - 2] = indicesSource[stripFrom[0] + 2];
+					indicesTarget[stripFrom[1] - 1] = indicesSource[stripFrom[0]];
+					indicesTarget[stripFrom[1]] = indicesSource[stripTo[0] + stripTo[1] - 2];
+					for (vertexIndex = 0; vertexIndex < stripTo[1] - 3; ++vertexIndex) {
+						indicesTarget[stripFrom[1] + 1 + vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 4 - vertexIndex];
+					}
+					stripTarget[1] = stripFrom[1] + stripTo[1] - 2;
 				} else if (mergeType == 3) {
+					memcpy(indicesTarget, &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
+					memcpy(&indicesTarget[stripFrom[1]], &indicesSource[stripTo[0] + 2], (stripTo[1] - 2) * sizeof(unsigned short));
+					stripTarget[1] = stripFrom[1] + stripTo[1] - 2;
+				} else if (mergeType == 4) {
+					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
+						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
+					}
+					indicesTarget[stripFrom[1] - 3] = indicesSource[stripFrom[0] + 1];
+					memcpy(&indicesTarget[stripFrom[1] - 2], &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
+					stripTarget[1] = stripFrom[1] - 2 + stripTo[1];
+				} else if (mergeType == 5) {
 					for (vertexIndex = 0; vertexIndex < stripTo[1] - 2; ++vertexIndex) {
 						indicesTarget[vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 1 - vertexIndex];
 					}
 					memcpy(&indicesTarget[stripTo[1] - 2], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
 					stripTarget[1] = stripTo[1] - 2 + stripFrom[1];
+				} else if (mergeType == 6) {
+					memcpy(indicesTarget, &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
+					indicesTarget[stripTo[1]] = indicesSource[stripFrom[0] + stripFrom[1] - 3];
+					indicesTarget[stripTo[1] + 1] = indicesSource[stripFrom[0] + stripFrom[1] - 2];
+					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
+						indicesTarget[stripTo[1] + 2 + vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 4 - vertexIndex];
+					}
+					stripTarget[1] = stripTo[1] + stripFrom[1] - 1;
 				}
 			} else {
 				memcpy(indicesTarget, &indicesSource[stripSource[0]], stripSource[1] * sizeof(unsigned short));
