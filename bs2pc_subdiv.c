@@ -293,12 +293,16 @@ static void BS2PC_MergeStrips() {
 				stripFrom = &setSource->strips[stripIndexFrom][0];
 				if (indicesSource[stripTo[0] + stripTo[1] - 3] == indicesSource[stripFrom[0]] &&
 						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 1]) {
-					// Found on c0a0e.
+					// Found on c0a0e, face 1346.
 					mergeType = 1;
+				} else if (indicesSource[stripTo[0] + stripTo[1] - 2] == indicesSource[stripFrom[0] + stripFrom[1] - 3] &&
+						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
+					// c0a0e 1474.
+					mergeType = 2;
 				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + 1] &&
 						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0]]) {
-					// Found on c1a0 with mergeType 1 only.
-					mergeType = 2;
+					// c1a0 3118.
+					mergeType = 3;
 				}
 				if (mergeType != 0) {
 					break;
@@ -331,6 +335,14 @@ static void BS2PC_MergeStrips() {
 					memcpy(&indicesTarget[stripTo[1] - 1], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
 					stripTarget[1] = stripTo[1] - 1 + stripFrom[1];
 				} else if (mergeType == 2) {
+					memcpy(indicesTarget, &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
+					indicesTarget[stripTo[1]] = indicesSource[stripFrom[0] + stripFrom[1] - 3];
+					indicesTarget[stripTo[1] + 1] = indicesSource[stripFrom[0] + stripFrom[1] - 2];
+					for (vertexIndex = 0; vertexIndex < stripTo[1] - 3; ++vertexIndex) {
+						indicesTarget[stripTo[1] + 2 + vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 4 - vertexIndex];
+					}
+					stripTarget[1] = stripTo[1] + stripFrom[1] - 1;
+				} else if (mergeType == 3) {
 					for (vertexIndex = 0; vertexIndex < stripTo[1] - 2; ++vertexIndex) {
 						indicesTarget[vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 1 - vertexIndex];
 					}
@@ -355,7 +367,7 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	const dvertex_gbx_t *mapVertexes = (const dvertex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_VERTEXES), *mapVertex;
 	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) (bs2pc_gbxMap + face->miptex);
 
-	float verts[64 * 3];
+	float verts[64 * 3], *vert;
 	unsigned int numverts = 0;
 	unsigned int i;
 	int lindex;
@@ -372,16 +384,16 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 	unsigned int subdivVertIndex;
 	unsigned int subdivStripIndex, subdivStripVertexCount;
 
-	for (i = 0; i < face->numedges; ++i) {
+	for (i = 0, vert = verts; i < face->numedges; ++i) {
 		lindex = mapSurfedges[face->firstedge + i];
 		if (lindex > 0) {
 			mapVertex = mapVertexes + mapEdges[lindex].v[0];
 		} else {
 			mapVertex = mapVertexes + mapEdges[-lindex].v[1];
 		}
-		verts[numverts * 3] = mapVertex->point[0];
-		verts[numverts * 3 + 1] = mapVertex->point[1];
-		verts[numverts * 3 + 2] = mapVertex->point[2];
+		*(vert++) = mapVertex->point[0];
+		*(vert++) = mapVertex->point[1];
+		*(vert++) = mapVertex->point[2];
 		++numverts;
 	}
 
