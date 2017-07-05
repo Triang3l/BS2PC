@@ -285,7 +285,6 @@ static void BS2PC_MergeStrips() {
 	bool mergeFlipTo = false;
 	unsigned int mergeFrom[2] = { 0, 0 }; // to[0] == from[mergeFrom[0]] && to[mergeToSecond] == from[mergeFrom[1]]
 	unsigned int mergeFromOffset = 0;
-	unsigned int mergeFromOther;
 
 	const unsigned int *stripSource;
 	unsigned int *stripTarget;
@@ -415,20 +414,27 @@ static void BS2PC_MergeStrips() {
 				stripTarget[1] = vertexCount;
 
 				// Bridge.
-				mergeFromOther = ((mergeFrom[0] == 1 || mergeFrom[1] == 1) ? 2 : 1);
+				indicesTarget[stripTarget[1]++] = endsFrom[(mergeFrom[0] == 1 || mergeFrom[1] == 1) ? 2 : 1];
 				if (mergeToSecond <= mergeFrom[0]) {
 					// Continuation (01-10, 01-20, 02-20).
-					indicesTarget[stripTarget[1]++] = endsFrom[mergeFromOther];
 					indicesTarget[stripTarget[1]++] = endsTo[0][0];
 					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
 					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
 				} else {
-					// Flip across degenerate (01-01, 01-02, 02-01, 02-02, 02-10).
-					indicesTarget[stripTarget[1]++] = endsFrom[mergeFromOther];
-					indicesTarget[stripTarget[1]++] = endsFrom[max(mergeFrom[0], mergeFrom[1])];
-					indicesTarget[stripTarget[1]++] = endsFrom[min(mergeFrom[0], mergeFrom[1])];
-					indicesTarget[stripTarget[1]++] = endsTo[0][1];
-					indicesTarget[stripTarget[1]++] = endsTo[0][2];
+					// Flip across degenerate (01-01, 01-02, 02-02, 02-10).
+					if (mergeFrom[0] < mergeFrom[1]) {
+						// 01-01, 01-02, 02-02.
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1]];
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0]];
+						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
+						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
+					} else {
+						// 02-10.
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0]];
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1]];
+						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
+						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
+					}
 				}
 
 				// Unpermuted triangles of the "to" strip in the end.
