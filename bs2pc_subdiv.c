@@ -410,7 +410,7 @@ static void BS2PC_MergeStrips() {
 						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
 					}
 				} else {
-					memcpy(indicesTarget, &indicesSource[stripFrom[1]], vertexCount * sizeof(unsigned short));
+					memcpy(indicesTarget, &indicesSource[stripFrom[0]], vertexCount * sizeof(unsigned short));
 				}
 				stripTarget[1] = vertexCount;
 
