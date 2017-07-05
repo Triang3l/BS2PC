@@ -1,5 +1,6 @@
 #include "bs2pc.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -159,7 +160,7 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	triPrevIndex = BS2PC_AddPolyVertex(verts + 3);
 	verts += 6;
 	for (i = 2; i < numverts; ++i, verts += 3) {
-		// CW on PC, CCW on PS2, so 0 and 1 are swapped.
+		// Swap 0 and 1 for easier tristrip merging.
 		*(triIndices++) = triPrevIndex;
 		*(triIndices++) = triFirstIndex;
 		triPrevIndex = BS2PC_AddPolyVertex(verts);
@@ -268,64 +269,114 @@ static void BS2PC_BuildStrips() {
 }
 
 static void BS2PC_MergeStrips() {
-	unsigned int mergeType;
+	bool merge;
+
 	const bs2pc_polyStripSet_t *setSource;
 	bs2pc_polyStripSet_t *setTarget;
 	const unsigned short *indicesSource;
 	unsigned short *indicesTarget;
-	unsigned int stripIndexTo = 0, stripIndexFrom = 0, stripIndex;
-	const unsigned int *stripTo = NULL, *stripFrom = NULL, *stripSource;
+
+	unsigned int stripIndexTo = 0, stripIndexFrom = 0;
+	const unsigned int *stripTo = NULL, *stripFrom = NULL;
+	unsigned short endsTo[2][3]; // { 0, 1, 2 }, { l-1, l-2, l-3 }
+	unsigned short endsFrom[6]; // 0, 1, 2, l-1, l-2, l-3
+
+	unsigned int mergeToSecond = 0; // 1 or 2. The first is considered 0 because 10=10 is 01=01 as well and 10=01 is 01=10.
+	bool mergeFlipTo = false;
+	unsigned int mergeFrom[2] = { 0, 0 }; // to[0] == from[mergeFrom[0]] && to[mergeToSecond] == from[mergeFrom[1]]
+	unsigned int mergeFromOffset = 0;
+	unsigned int mergeFromOther;
+
+	const unsigned int *stripSource;
 	unsigned int *stripTarget;
-	unsigned int vertexIndex;
+	unsigned int stripIndex, vertexIndex, vertexCount;
 
+	// Merging is always performed by attaching stripFrom to the beginning or the end of stripFrom.
+	// So many cases can be implemented only for one direction as the loop will swap stripFrom and stripTo.
 	while (true) {
-		mergeType = 0;
+		merge = false;
 
-		// Find two strips to merge.
+		// Finding two strips to merge.
+		// For two strips to be merged, 01 or 02 side of each must be in the first triangle of the other.
 		setSource = &bs2pc_polyStripSets[bs2pc_currentPolyStripSet];
 		indicesSource = setSource->indices;
 		for (stripIndexTo = 0; stripIndexTo < setSource->stripCount; ++stripIndexTo) {
 			stripTo = &setSource->strips[stripIndexTo][0];
+			memcpy(endsTo[0], &indicesSource[stripTo[0]], 3 * sizeof(unsigned short));
+			endsTo[1][0] = indicesSource[stripTo[0] + stripTo[1] - 1];
+			endsTo[1][1] = indicesSource[stripTo[0] + stripTo[1] - 2];
+			endsTo[1][2] = indicesSource[stripTo[0] + stripTo[1] - 3];
+
 			for (stripIndexFrom = 0; stripIndexFrom < setSource->stripCount; ++stripIndexFrom) {
 				if (stripIndexFrom == stripIndexTo) {
 					continue;
 				}
 				stripFrom = &setSource->strips[stripIndexFrom][0];
-				if (indicesSource[stripTo[0] + stripTo[1] - 3] == indicesSource[stripFrom[0]] &&
-						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 1]) {
-					// Found on c0a0e, face 1346.
-					mergeType = 1;
-				} else if (indicesSource[stripTo[0] + stripTo[1] - 3] == indicesSource[stripFrom[0]] &&
-						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + 2]) {
-					// c0a0e 1420.
-					mergeType = 2;
-				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + stripFrom[1] - 2] &&
-						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
-					// c0a0e 1420.
-					mergeType = 3;
-				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + 2] &&
-						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0]]) {
-					// c0a0e 1420.
-					mergeType = 4;
-				} else if (indicesSource[stripTo[0]] == indicesSource[stripFrom[0] + 1] &&
-						indicesSource[stripTo[0] + 1] == indicesSource[stripFrom[0]]) {
-					// c1a0 3118.
-					mergeType = 5;
-				} else if (indicesSource[stripTo[0] + stripTo[1] - 2] == indicesSource[stripFrom[0] + stripFrom[1] - 3] &&
-						indicesSource[stripTo[0] + stripTo[1] - 1] == indicesSource[stripFrom[0] + stripFrom[1] - 1]) {
-					// c0a0e 1474 - degenerate.
-					mergeType = 6;
+				memcpy(endsFrom, &indicesSource[stripFrom[0]], 3 * sizeof(unsigned short));
+				endsFrom[3] = indicesSource[stripFrom[0] + stripFrom[1] - 1];
+				endsFrom[4] = indicesSource[stripFrom[0] + stripFrom[1] - 2];
+				endsFrom[5] = indicesSource[stripFrom[0] + stripFrom[1] - 3];
+
+				mergeFlipTo = false;
+				while (true) {
+					// Finding the match for the first vertex of stripTo.
+					for (mergeFrom[0] = 0; mergeFrom[0] <= 5; ++mergeFrom[0]) {
+						if (endsTo[mergeFlipTo][0] == endsFrom[mergeFrom[0]]) {
+							break;
+						}
+					}
+					mergeFromOffset = (mergeFrom[0] >= 3 ? 3 : 0);
+
+					// Finding the second vertex of the edge to merge.
+					merge = true;
+					switch (mergeFrom[0] - mergeFromOffset) {
+					case 0: // 0* = 0*: 01 = 01, 01 = 02, 02 = 02 (02 = 01 handled by reversing from and to).
+						if (endsTo[mergeFlipTo][1] == endsFrom[mergeFromOffset + 1]) {
+							mergeToSecond = 1;
+							mergeFrom[1] = mergeFromOffset + 1;
+						} else if (endsTo[mergeFlipTo][1] == endsFrom[mergeFromOffset + 2]) {
+							mergeToSecond = 1;
+							mergeFrom[1] = mergeFromOffset + 2;
+						} else if (endsTo[mergeFlipTo][2] == endsFrom[mergeFromOffset + 2]) {
+							mergeToSecond = 2;
+							mergeFrom[1] = mergeFromOffset + 2;
+						} else {
+							merge = false;
+						}
+						break;
+					case 1: // 0* = 1*: 01 = 10, 02 = 10.
+					case 2: // 0* = 2*: 01 = 20, 02 = 20.
+						mergeFrom[1] = mergeFromOffset;
+						if (endsTo[mergeFlipTo][1] == endsFrom[mergeFromOffset]) {
+							mergeToSecond = 1;
+						} else if (endsTo[mergeFlipTo][2] == endsFrom[mergeFromOffset]) {
+							mergeToSecond = 2;
+						} else {
+							merge = false;
+						}
+						break;
+					default: // 6 - first match not found.
+						merge = false;
+						break;
+					}
+
+					// Break if merged or completely failed to find common vertices.
+					if (merge || mergeFlipTo) {
+						break;
+					}
+					mergeFlipTo = true;
 				}
-				if (mergeType != 0) {
+
+				if (merge) {
 					break;
 				}
 			}
-			if (mergeType != 0) {
+			if (merge) {
 				break;
 			}
 		}
 
-		if (mergeType == 0) {
+		if (!merge) {
 			break;
 		}
 
@@ -342,48 +393,54 @@ static void BS2PC_MergeStrips() {
 			stripTarget[0] = setTarget->indexCount;
 			indicesTarget = &setTarget->indices[stripTarget[0]];
 			if (stripIndex == stripIndexTo) {
-				if (mergeType == 1) {
-					memcpy(indicesTarget, &indicesSource[stripTo[0]], (stripTo[1] - 1) * sizeof(unsigned short));
-					memcpy(&indicesTarget[stripTo[1] - 1], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
-					stripTarget[1] = stripTo[1] - 1 + stripFrom[1];
-				} else if (mergeType == 2) {
-					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
-						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
-					}
-					indicesTarget[stripFrom[1] - 3] = indicesSource[stripFrom[0] + 1];
-					indicesTarget[stripFrom[1] - 2] = indicesSource[stripFrom[0] + 2];
-					indicesTarget[stripFrom[1] - 1] = indicesSource[stripFrom[0]];
-					indicesTarget[stripFrom[1]] = indicesSource[stripTo[0] + stripTo[1] - 2];
-					for (vertexIndex = 0; vertexIndex < stripTo[1] - 3; ++vertexIndex) {
-						indicesTarget[stripFrom[1] + 1 + vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 4 - vertexIndex];
-					}
-					stripTarget[1] = stripFrom[1] + stripTo[1] - 2;
-				} else if (mergeType == 3) {
-					memcpy(indicesTarget, &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
-					memcpy(&indicesTarget[stripFrom[1]], &indicesSource[stripTo[0] + 2], (stripTo[1] - 2) * sizeof(unsigned short));
-					stripTarget[1] = stripFrom[1] + stripTo[1] - 2;
-				} else if (mergeType == 4) {
-					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
-						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
-					}
-					indicesTarget[stripFrom[1] - 3] = indicesSource[stripFrom[0] + 1];
-					memcpy(&indicesTarget[stripFrom[1] - 2], &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
-					stripTarget[1] = stripFrom[1] - 2 + stripTo[1];
-				} else if (mergeType == 5) {
-					for (vertexIndex = 0; vertexIndex < stripTo[1] - 2; ++vertexIndex) {
-						indicesTarget[vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 1 - vertexIndex];
-					}
-					memcpy(&indicesTarget[stripTo[1] - 2], &indicesSource[stripFrom[0]], stripFrom[1] * sizeof(unsigned short));
-					stripTarget[1] = stripTo[1] - 2 + stripFrom[1];
-				} else if (mergeType == 6) {
-					memcpy(indicesTarget, &indicesSource[stripTo[0]], stripTo[1] * sizeof(unsigned short));
-					indicesTarget[stripTo[1]] = indicesSource[stripFrom[0] + stripFrom[1] - 3];
-					indicesTarget[stripTo[1] + 1] = indicesSource[stripFrom[0] + stripFrom[1] - 2];
-					for (vertexIndex = 0; vertexIndex < stripFrom[1] - 3; ++vertexIndex) {
-						indicesTarget[stripTo[1] + 2 + vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 4 - vertexIndex];
-					}
-					stripTarget[1] = stripTo[1] + stripFrom[1] - 1;
+				// Stop using mergeFromOffset and mergeFlipTo for simplicity as we don't need two sets anymore.
+				if (mergeFromOffset != 0) {
+					memcpy(endsFrom, &endsFrom[mergeFromOffset], 3 * sizeof(unsigned short));
+					mergeFrom[0] -= mergeFromOffset;
+					mergeFrom[1] -= mergeFromOffset;
 				}
+				if (mergeFlipTo) {
+					memcpy(endsTo[0], endsTo[1], 3 * sizeof(unsigned short));
+				}
+
+				// Unpermuted triangles of the "from" strip in the beginning.
+				vertexCount = stripFrom[1] - 3;
+				if (mergeFromOffset == 0) {
+					for (vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+						indicesTarget[vertexIndex] = indicesSource[stripFrom[0] + stripFrom[1] - 1 - vertexIndex];
+					}
+				} else {
+					memcpy(indicesTarget, &indicesSource[stripFrom[1]], vertexCount * sizeof(unsigned short));
+				}
+				stripTarget[1] = vertexCount;
+
+				// Bridge.
+				mergeFromOther = ((mergeFrom[0] == 1 || mergeFrom[1] == 1) ? 2 : 1);
+				if (mergeToSecond <= mergeFrom[0]) {
+					// Continuation (01-10, 01-20, 02-20).
+					indicesTarget[stripTarget[1]++] = endsFrom[mergeFromOther];
+					indicesTarget[stripTarget[1]++] = endsTo[0][0];
+					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
+					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
+				} else {
+					// Flip across degenerate (01-01, 01-02, 02-01, 02-02, 02-10).
+					indicesTarget[stripTarget[1]++] = endsFrom[mergeFromOther];
+					indicesTarget[stripTarget[1]++] = endsFrom[max(mergeFrom[0], mergeFrom[1])];
+					indicesTarget[stripTarget[1]++] = endsFrom[min(mergeFrom[0], mergeFrom[1])];
+					indicesTarget[stripTarget[1]++] = endsTo[0][1];
+					indicesTarget[stripTarget[1]++] = endsTo[0][2];
+				}
+
+				// Unpermuted triangles of the "to" strip in the end.
+				vertexCount = stripTo[1] - 3;
+				if (mergeFlipTo) {
+					for (vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+						indicesTarget[stripTarget[1] + vertexIndex] = indicesSource[stripTo[0] + stripTo[1] - 4 - vertexIndex];
+					}
+				} else {
+					memcpy(&indicesTarget[stripTarget[1]], &indicesSource[stripTo[0] + 3], vertexCount * sizeof(unsigned short));
+				}
+				stripTarget[1] += vertexCount;
 			} else {
 				memcpy(indicesTarget, &indicesSource[stripSource[0]], stripSource[1] * sizeof(unsigned short));
 				stripTarget[1] = stripSource[1];
