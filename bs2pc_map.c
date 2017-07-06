@@ -338,6 +338,42 @@ static void BS2PC_SkipNodrawInGbxMarksurfaceRange(unsigned int inFirst, unsigned
 	*outCount = count;
 }
 
+typedef struct {
+	const char *polys;
+	unsigned int offset;
+	unsigned int size;
+} bs2pc_faceSubdivision_t;
+static bs2pc_faceSubdivision_t *bs2pc_faceSubdivisions = NULL;
+static unsigned int bs2pc_faceSubdivisionSize = 0;
+
+void BS2PC_SubdivideIdSurfaces() {
+	const dface_id_t *face = (const dface_id_t *) BS2PC_IdLump(LUMP_ID_FACES);
+	unsigned int faceIndex, faceCount = BS2PC_IdLumpSize(LUMP_ID_FACES) / sizeof(dface_id_t);
+	bs2pc_faceSubdivision_t *subdivision;
+	const dtexinfo_id_t *texinfos = (const dtexinfo_id_t *) BS2PC_IdLump(LUMP_ID_TEXINFO);
+	unsigned int textureIndex;
+	unsigned int faceFlags;
+
+	bs2pc_faceSubdivisionSize = 0;
+
+	if (faceCount == 0) {
+		return;
+	}
+
+	BS2PC_AllocReplace(&bs2pc_faceSubdivisions, faceCount * sizeof(bs2pc_faceSubdivision_t), true);
+
+	for (faceIndex = 0, subdivision = bs2pc_faceSubdivisions; faceIndex < faceCount; ++faceIndex, ++face, ++subdivision) {
+		textureIndex = bs2pc_idValidTextureMap[texinfos[face->texinfo].miptex];
+		faceFlags = bs2pc_idTextureAdditionalInfo[textureIndex].faceFlags;
+		if (!(faceFlags & SURF_HASPOLYS)) {
+			continue;
+		}
+		subdivision->offset = bs2pc_faceSubdivisionSize;
+		subdivision->polys = BS2PC_SubdivideIdSurface(faceIndex, faceFlags, bs2pc_idTextures[textureIndex], &subdivision->size);
+		bs2pc_faceSubdivisionSize += subdivision->size;
+	}
+}
+
 static void BS2PC_PreProcessGbxMap() {
 	fputs("Processing the texture lump...\n", stderr);
 	BS2PC_ProcessGbxTextureLump();
@@ -350,6 +386,8 @@ static void BS2PC_PreProcessIdMap() {
 	BS2PC_LoadWadsFromEntities((const char *) BS2PC_IdLump(LUMP_ID_ENTITIES), BS2PC_IdLumpSize(LUMP_ID_ENTITIES));
 	fputs("Processing the texture lump...\n", stderr);
 	BS2PC_ProcessIdTextureLump();
+	fputs("Subdividing alphatest and turbulent surfaces...\n", stderr);
+	BS2PC_SubdivideIdSurfaces(); // Depends on ProcessIdTextureLump.
 }
 
 // Conversion
@@ -455,8 +493,8 @@ static void BS2PC_AllocateGbxMapFromId() {
 	mapSize += (headerGbx.lumplen[LUMP_GBX_EDGES] + 15) & ~15;
 
 	headerGbx.lumpofs[LUMP_GBX_SURFEDGES] = mapSize;
-	headerGbx.lumpnum[LUMP_GBX_SURFEDGES] = BS2PC_IdLumpSize(LUMP_ID_SURFEDGES) / sizeof(unsigned int);
-	headerGbx.lumplen[LUMP_GBX_SURFEDGES] = headerGbx.lumpnum[LUMP_GBX_SURFEDGES] * sizeof(unsigned int);
+	headerGbx.lumpnum[LUMP_GBX_SURFEDGES] = BS2PC_IdLumpSize(LUMP_ID_SURFEDGES) / sizeof(int);
+	headerGbx.lumplen[LUMP_GBX_SURFEDGES] = headerGbx.lumpnum[LUMP_GBX_SURFEDGES] * sizeof(int);
 	mapSize += (headerGbx.lumplen[LUMP_GBX_SURFEDGES] + 15) & ~15;
 
 	headerGbx.lumpofs[LUMP_GBX_VERTEXES] = mapSize;
@@ -507,7 +545,7 @@ static void BS2PC_AllocateGbxMapFromId() {
 	mapSize += (headerGbx.lumplen[LUMP_GBX_ENTITIES] + 15) & ~15;
 
 	headerGbx.lumpofs[LUMP_GBX_POLYS] = mapSize;
-	// TODO: Polys.
+	headerGbx.lumplen[LUMP_GBX_POLYS] = bs2pc_faceSubdivisionSize;
 	mapSize += (headerGbx.lumplen[LUMP_GBX_POLYS] + 15) & ~15;
 
 	bs2pc_gbxMapSize = mapSize;
@@ -761,9 +799,9 @@ static void BS2PC_ConvertFacesToId() {
 	}
 }
 
-static void BS2PC_CalcSurfaceExtents(const dface_id_t *face, short *outTextureMins, short *outExtents) {
+void BS2PC_CalcIdSurfaceExtents(const dface_id_t *face, short outTextureMins[2], short outExtents[2]) {
 	const dtexinfo_id_t *tex = (const dtexinfo_id_t *) BS2PC_IdLump(LUMP_ID_TEXINFO) + face->texinfo;
-	const unsigned int *surfedges = (const unsigned int *) BS2PC_IdLump(LUMP_ID_SURFEDGES);
+	const int *surfedges = (const int *) BS2PC_IdLump(LUMP_ID_SURFEDGES);
 	const dedge_t *edges = (const dedge_t *) BS2PC_IdLump(LUMP_ID_EDGES);
 	const dvertex_id_t *vertexes = (const dvertex_id_t *) BS2PC_IdLump(LUMP_ID_VERTEXES), *v;
 	float mins[] = { 999999.0f, 999999.0f }, maxs[] = { -999999.0f, -999999.0f }, val;
@@ -797,8 +835,12 @@ static void BS2PC_CalcSurfaceExtents(const dface_id_t *face, short *outTextureMi
 		bmins[i] = (int) floorf(mins[i] * (1.0f / 16.0f));
 		bmaxs[i] = (int) ceilf(maxs[i] * (1.0f / 16.0f));
 
-		outTextureMins[i] = (short) (bmins[i] * 16.0f);
-		outExtents[i] = (short) ((bmaxs[i] - bmins[i]) * 16.0f);
+		if (outTextureMins != NULL) {
+			outTextureMins[i] = (short) (bmins[i] * 16.0f);
+		}
+		if (outExtents != NULL) {
+			outExtents[i] = (short) ((bmaxs[i] - bmins[i]) * 16.0f);
+		}
 	}
 }
 
@@ -806,16 +848,17 @@ static void BS2PC_ConvertFacesToGbx() {
 	const dface_id_t *id = (const dface_id_t *) BS2PC_IdLump(LUMP_ID_FACES);
 	const dtexinfo_id_t *texinfoLump = (const dtexinfo_id_t *) BS2PC_IdLump(LUMP_ID_TEXINFO);
 	dface_gbx_t *gbx = (dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES);
-	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
-	for (index = 0; index < count; ++index, ++id, ++gbx) {
+	unsigned int polyOffset = BS2PC_GbxLumpOffset(LUMP_GBX_POLYS);
+	const bs2pc_faceSubdivision_t *subdivision = bs2pc_faceSubdivisions;
+	unsigned int index, count = BS2PC_IdLumpSize(LUMP_ID_FACES) / sizeof(dface_id_t);
+	for (index = 0; index < count; ++index, ++id, ++gbx, ++subdivision) {
 		const dtexinfo_id_t *texinfo = &texinfoLump[id->texinfo];
 		unsigned int miptex = bs2pc_idValidTextureMap[texinfo->miptex];
 		float len;
 		memset(gbx, 0, sizeof(dface_gbx_t)); // Lots of unknown fields that are probably runtime-only and 0 in the file.
 		memcpy(gbx->vecs, texinfo->vecs, sizeof(gbx->vecs));
 		gbx->side = id->side;
-		// TODO: Don't skip SURF_HASPOLYS when subdivision is done.
-		gbx->flags = (gbx->side != 0 ? SURF_PLANEBACK : 0) | (bs2pc_idTextureAdditionalInfo[miptex].faceFlags & ~SURF_HASPOLYS);
+		gbx->flags = (gbx->side != 0 ? SURF_PLANEBACK : 0) | bs2pc_idTextureAdditionalInfo[miptex].faceFlags;
 		gbx->miptex = BS2PC_GbxIndexToOffset(miptex, LUMP_GBX_TEXTURES, sizeof(dmiptex_gbx_t));
 		gbx->lightofs = id->lightofs + (id->lightofs != UINT_MAX ? BS2PC_GbxLumpOffset(LUMP_GBX_LIGHTING) : 0);
 		gbx->plane = BS2PC_GbxIndexToOffset(id->planenum, LUMP_GBX_PLANES, sizeof(dplane_gbx_t));
@@ -827,10 +870,9 @@ static void BS2PC_ConvertFacesToGbx() {
 			len = 1.0f;
 		}
 		gbx->len = len;
-		BS2PC_CalcSurfaceExtents(id, gbx->texturemins, gbx->extents);
+		BS2PC_CalcIdSurfaceExtents(id, gbx->texturemins, gbx->extents);
 		memcpy(gbx->styles, id->styles, sizeof(gbx->styles));
-		// TODO: Polys.
-		gbx->polys = UINT_MAX;
+		gbx->polys = (subdivision->polys != NULL ? polyOffset + subdivision->offset : UINT_MAX);
 	}
 }
 
@@ -1041,10 +1083,17 @@ void BS2PC_ConvertTexturesToId() {
 				*(paletteId++) = colorGbx[1];
 				*(paletteId++) = colorGbx[2];
 			} else {
-				*(paletteId++) = (unsigned char) (((unsigned int) min(colorGbx[0], 127)) * 255 / 127);
-				*(paletteId++) = (unsigned char) (((unsigned int) min(colorGbx[1], 127)) * 255 / 127);
-				*(paletteId++) = (unsigned char) (((unsigned int) min(colorGbx[2], 127)) * 255 / 127);
+				unsigned int r = min(colorGbx[0], 127), g = min(colorGbx[1], 127), b = min(colorGbx[2], 127);
+				*(paletteId++) = (r << 1) | (r >> 6);
+				*(paletteId++) = (g << 1) | (g >> 6);
+				*(paletteId++) = (b << 1) | (b >> 6);
 			}
+		}
+
+		if (textureGbx->name[0] == '{') {
+			paletteId[-3] = 0;
+			paletteId[-2] = 0;
+			paletteId[-1] = 255;
 		}
 	}
 }
@@ -1208,7 +1257,21 @@ void BS2PC_ConvertTexturesToGbx() {
 			*(colorGbx++) = (liquid ? 0xff : 0x7f);
 			*(colorGbx++) = 0x80;
 		}
+		if (textureGbx->name[0] == '{') {
+			memset(colorGbx - 4, 0, 4);
+		}
 		gbxPaletteOffset += 256 * 4;
+	}
+}
+
+void BS2PC_WritePolysToGbx() {
+	unsigned char *polys = BS2PC_GbxLump(LUMP_GBX_POLYS);
+	const bs2pc_faceSubdivision_t *subdivision = bs2pc_faceSubdivisions;
+	unsigned int index, count = BS2PC_GbxLumpCount(LUMP_GBX_FACES);
+	for (index = 0; index < count; ++index, ++subdivision) {
+		if (subdivision->polys != NULL) {
+			memcpy(polys + subdivision->offset, subdivision->polys, subdivision->size);
+		}
 	}
 }
 
@@ -1258,7 +1321,7 @@ void BS2PC_ConvertIdToGbx() {
 		exit(EXIT_FAILURE);
 	}
 	BS2PC_PreProcessIdMap();
-	fputs("Initializing the .bsp header...\n", stderr);
+	fputs("Initializing the .bs2 header...\n", stderr);
 	BS2PC_AllocateGbxMapFromId();
 	fputs("Converting planes...\n", stderr);
 	BS2PC_ConvertPlanesToGbx();
@@ -1292,5 +1355,6 @@ void BS2PC_ConvertIdToGbx() {
 	BS2PC_ConvertTexturesToGbx();
 	fputs("Converting entities...\n", stderr);
 	BS2PC_ConvertEntitiesToGbx();
-	// TODO: Polys.
+	fputs("Writing polys...\n", stderr);
+	BS2PC_WritePolysToGbx();
 }

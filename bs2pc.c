@@ -74,7 +74,7 @@ int main(int argc, const char * const *argv) {
 		bs2pc_idMapSize = sourceFileSize;
 		bs2pc_idMap = sourceFile;
 
-		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision is missing! DO NOT share any PS2 maps produced by this build!\n", stderr);
+		fputs("WARNING: .bsp to .bs2 is INCOMPLETE! Polygon subdivision is broken! DO NOT share any PS2 maps produced by this build!\n", stderr);
 		BS2PC_ConvertIdToGbx();
 
 		fputs("Compressing .bs2...\n", stderr);

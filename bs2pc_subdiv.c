@@ -329,16 +329,10 @@ static void BS2PC_MergeStrips() {
 					// Finding the second vertex of the edge to merge.
 					merge = true;
 					switch (mergeFrom[0] - mergeFromOffset) {
-					case 0: // 0* = 0*: 01 = 01, 01 = 02, 02 = 02 (02 = 01 handled by reversing from and to).
+					case 0: // 0* = 0*: 01 = 01 (01 = 02 and 02 = 02 seem impossible so not handled).
 						if (endsTo[mergeFlipTo][1] == endsFrom[mergeFromOffset + 1]) {
 							mergeToSecond = 1;
 							mergeFrom[1] = mergeFromOffset + 1;
-						} else if (endsTo[mergeFlipTo][1] == endsFrom[mergeFromOffset + 2]) {
-							mergeToSecond = 1;
-							mergeFrom[1] = mergeFromOffset + 2;
-						} else if (endsTo[mergeFlipTo][2] == endsFrom[mergeFromOffset + 2]) {
-							mergeToSecond = 2;
-							mergeFrom[1] = mergeFromOffset + 2;
 						} else {
 							merge = false;
 						}
@@ -414,26 +408,28 @@ static void BS2PC_MergeStrips() {
 				stripTarget[1] = vertexCount;
 
 				// Bridge.
-				indicesTarget[stripTarget[1]++] = endsFrom[(mergeFrom[0] == 1 || mergeFrom[1] == 1) ? 2 : 1];
 				if (mergeToSecond <= mergeFrom[0]) {
 					// Continuation (01-10, 01-20, 02-20).
+					indicesTarget[stripTarget[1]++] = endsFrom[(mergeFrom[0] == 1 || mergeFrom[1] == 1) ? 2 : 1];
 					indicesTarget[stripTarget[1]++] = endsTo[0][0];
 					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
 					indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
 				} else {
-					// Flip across degenerate (01-01, 01-02, 02-02, 02-10).
-					if (mergeFrom[0] < mergeFrom[1]) {
-						// 01-01, 01-02, 02-02.
-						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1]];
-						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0]];
-						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
-						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
-					} else {
+					// Flip across degenerate (01-01, 02-10).
+					if (mergeFrom[0] != 0) {
 						// 02-10.
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0] ^ 3];
 						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0]];
+						indicesTarget[stripTarget[1]++] = endsFrom[0];
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[0]];
+						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
+					} else {
+						// 01-01.
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1] ^ 3];
+						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1]];
+						indicesTarget[stripTarget[1]++] = endsFrom[0];
 						indicesTarget[stripTarget[1]++] = endsFrom[mergeFrom[1]];
 						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond ^ 3];
-						indicesTarget[stripTarget[1]++] = endsTo[0][mergeToSecond];
 					}
 				}
 
@@ -458,22 +454,22 @@ static void BS2PC_MergeStrips() {
 	}
 }
 
-unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *outSize) {
-	const dface_gbx_t *face = ((const dface_gbx_t *) BS2PC_GbxLump(LUMP_GBX_FACES)) + faceIndex;
-	const int *mapSurfedges = (const int *) BS2PC_GbxLump(LUMP_GBX_SURFEDGES);
-	const dedge_t *mapEdges = (const dedge_t *) BS2PC_GbxLump(LUMP_GBX_EDGES);
-	const dvertex_gbx_t *mapVertexes = (const dvertex_gbx_t *) BS2PC_GbxLump(LUMP_GBX_VERTEXES), *mapVertex;
-	const dmiptex_gbx_t *texture = (const dmiptex_gbx_t *) (bs2pc_gbxMap + face->miptex);
+unsigned char *BS2PC_SubdivideIdSurface(unsigned int faceIndex, unsigned int faceFlags, const dmiptex_id_t *texture, unsigned int *outSize) {
+	const dface_id_t *face = ((const dface_id_t *) BS2PC_IdLump(LUMP_ID_FACES)) + faceIndex;
+	const int *mapSurfedges = (const int *) BS2PC_IdLump(LUMP_ID_SURFEDGES);
+	const dedge_t *mapEdges = (const dedge_t *) BS2PC_IdLump(LUMP_ID_EDGES);
+	const dvertex_id_t *mapVertexes = (const dvertex_id_t *) BS2PC_IdLump(LUMP_ID_VERTEXES), *mapVertex;
+	const dtexinfo_id_t *texinfo = ((const dtexinfo_id_t *) BS2PC_IdLump(LUMP_ID_TEXINFO)) + face->texinfo;
 
 	float verts[64 * 3], *vert;
 	unsigned int numverts = 0;
 	unsigned int i;
 	int lindex;
-	const float *vecs = &face->vecs[0][0];
+	const float *vecs = &texinfo->vecs[0][0];
 
 	float scaleS = 1.0f / (float) texture->width, scaleT = 1.0f / (float) texture->height;
 	float offsetS, offsetT;
-	float textureMinS, textureMinT;
+	short textureMins[2];
 
 	bs2pc_polyStripSet_t *stripSet;
 	unsigned int subdivSize;
@@ -497,10 +493,9 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 
 	offsetS = (float) (int) ((BS2PC_DotProduct(verts, vecs) + vecs[3]) * scaleS);
 	offsetT = (float) (int) ((BS2PC_DotProduct(verts, vecs + 4) + vecs[7]) * scaleT);
-	textureMinS = (float) face->texturemins[0];
-	textureMinT = (float) face->texturemins[1];
+	BS2PC_CalcIdSurfaceExtents(face, textureMins, NULL);
 
-	bs2pc_subdivideSize = ((face->flags & SURF_DRAWTURB) ? 64.0f : 32.0f);
+	bs2pc_subdivideSize = ((faceFlags & SURF_DRAWTURB) ? 64.0f : 32.0f);
 	bs2pc_polyVertCount = 0;
 	bs2pc_polyTriCount = 0;
 	BS2PC_SubdividePolygon(numverts, verts);
@@ -532,8 +527,8 @@ unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *o
 		t = BS2PC_DotProduct(position, vecs + 4) + vecs[7];
 		subdivVert->st[0] = s * scaleS - offsetS;
 		subdivVert->st[1] = t * scaleT - offsetT;
-		subdivVert->stoffset[0] = (unsigned char) ((s - textureMinS) * (1.0f / 16.0f) + 0.5f);
-		subdivVert->stoffset[1] = (unsigned char) ((t - textureMinT) * (1.0f / 16.0f) + 0.5f);
+		subdivVert->stoffset[0] = (unsigned char) ((s - (float) textureMins[0]) * (1.0f / 16.0f) + 0.5f);
+		subdivVert->stoffset[1] = (unsigned char) ((t - (float) textureMins[1]) * (1.0f / 16.0f) + 0.5f);
 		subdivVert->pad[0] = subdivVert->pad[1] = 0;
 		subdivPosition += sizeof(bs2pc_polyvert_t);
 	}

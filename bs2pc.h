@@ -65,6 +65,7 @@ inline unsigned int BS2PC_GbxOffsetToIndex(bspoffset_t offset, unsigned int lump
 inline bspoffset_t BS2PC_GbxIndexToOffset(unsigned int index, unsigned int lump, unsigned int lumpSize) {
 	return BS2PC_GbxLumpOffset(lump) + index * lumpSize;
 }
+void BS2PC_CalcIdSurfaceExtents(const dface_id_t *face, short outTextureMins[2], short outExtents[2]);
 
 // Conversion
 
@@ -83,6 +84,7 @@ typedef struct {
 } bs2pc_polyvert_t;
 #pragma pack(pop)
 
+unsigned char *BS2PC_SubdivideIdSurface(unsigned int faceIndex, unsigned int faceFlags, const dmiptex_id_t *texture, unsigned int *outSize);
 unsigned char *BS2PC_SubdivideGbxSurface(unsigned int faceIndex, unsigned int *outSize);
 
 // WAD texture management
