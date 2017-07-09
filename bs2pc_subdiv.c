@@ -76,10 +76,10 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	unsigned int f, b;
 	float dist[64];
 	float frac;
+	unsigned short indicesOfVerts[64];
 	bs2pc_polyStripSet_t *stripSet;
 	unsigned int *strip;
 	unsigned short *indices;
-	unsigned int vertexIndex;
 
 	if (numverts > 60) {
 		fputs("Too many vertices in a face subdivision step\n.", stderr);
@@ -149,6 +149,10 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 		return;
 	}
 
+	for (i = 0; i < numverts; ++i) {
+		indicesOfVerts[i] = BS2PC_AddPolyVertex(verts + i * 3);
+	}
+
 	stripSet = &bs2pc_polyStripSets[bs2pc_currentPolyStripSet];
 	if (stripSet->stripCount >= BS2PC_MAX_POLY_STRIPS || stripSet->indexCount + numverts > BS2PC_MAX_POLY_STRIP_INDICES) {
 		fputs("Too many triangle strips or vertex indices after face subdivision.\n", stderr);
@@ -159,14 +163,7 @@ static void BS2PC_SubdividePolygon(unsigned int numverts, float *verts) {
 	strip[1] = numverts;
 	indices = &stripSet->indices[stripSet->indexCount];
 	for (i = 0; i < numverts; ++i) {
-		if ((i & 1) == 0) {
-			vertexIndex = 1 + (i >> 1);
-		} else if (i == 1) {
-			vertexIndex = 0;
-		} else {
-			vertexIndex = numverts - (i >> 1);
-		}
-		*(indices++) = BS2PC_AddPolyVertex(verts + vertexIndex * 3);
+		*(indices++) = indicesOfVerts[(i & 1) ? (i >> 1) : (numverts - 1 - (i >> 1))];
 	}
 	stripSet->indexCount += numverts;
 }
