@@ -1,0 +1,96 @@
+location("build");
+
+workspace("bs2pc");
+	configurations({
+		"Debug",
+		"Release",
+	});
+	startproject("bs2pc");
+
+	filter("configurations:Debug");
+		optimize("Off");
+		symbols("On");
+	filter("configurations:Release");
+		defines({
+			"NDEBUG",
+		});
+		flags({
+			"LinkTimeOptimization",
+		});
+		optimize("Speed");
+		symbols("Off");
+	filter({});
+
+	project("zlib");
+		files({
+			-- Source files.
+			"zlib/adler32.c",
+			"zlib/compress.c",
+			"zlib/crc32.c",
+			"zlib/deflate.c",
+			"zlib/gzclose.c",
+			"zlib/gzlib.c",
+			"zlib/gzread.c",
+			"zlib/gzwrite.c",
+			"zlib/infback.c",
+			"zlib/inffast.c",
+			"zlib/inflate.c",
+			"zlib/inftrees.c",
+			"zlib/trees.c",
+			"zlib/uncompr.c",
+			"zlib/zutil.c",
+			-- Header files.
+			"zlib/deflate.h",
+			"zlib/infblock.h",
+			"zlib/infcodes.h",
+			"zlib/inffast.h",
+			"zlib/inftrees.h",
+			"zlib/infutil.h",
+			"zlib/zconf.h",
+			"zlib/zlib.h",
+			"zlib/zutil.h",
+		});
+		kind("StaticLib");
+		language("C");
+
+	project("bs2pclib");
+		characterset("Unicode");
+		cppdialect("C++17");
+		files({
+			"bs2pclib/bs2pc_convert.cpp",
+			"bs2pclib/bs2pc_compress.cpp",
+			"bs2pclib/bs2pc_entities.cpp",
+			"bs2pclib/bs2pc_gbx_map.cpp",
+			"bs2pclib/bs2pc_id_map.cpp",
+			"bs2pclib/bs2pc_parse_token.cpp",
+			"bs2pclib/bs2pc_polygons.cpp",
+			"bs2pclib/bs2pc_textures.cpp",
+			"bs2pclib/bs2pclib.hpp",
+		});
+		flags({
+			"FatalWarnings",
+		});
+		kind("StaticLib");
+		language("C++");
+		links({
+			"zlib",
+		});
+		strictaliasing("Level3");
+
+	project("bs2pc");
+		characterset("Unicode");
+		cppdialect("C++17");
+		files({
+			"bs2pc.cpp",
+		});
+		flags({
+			"FatalWarnings",
+		});
+		kind("ConsoleApp");
+		language("C++");
+		links({
+			"bs2pclib",
+			-- For the gmake2 action, which doesn't support transitive linkage.
+			"zlib",
+		});
+		strictaliasing("Level3");
