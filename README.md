@@ -30,6 +30,7 @@ This page describes only the basic use cases. For all available options, run the
 - [Apache3](https://www.romhacking.net/utilities/584/) — a disc image editor capable of extracting files, as well as replacing files in PS2 disc images without changing their layout. You can modify `pak0.pak` as long as you don't make it larger, and then replace it in the disc image by right-clicking it in Apache3 and pressing "Replace Selected File", with "Update TOC" unchecked, and "Ignore File Size Differences" checked.
 - [PakScape](https://gamebanana.com/tools/2548) — a browser and editor of .pak files used by Quake and Half-Life on both the PC and the PS2, that can be used to extract maps and other files from Half-Life .pak files, as well as to replace files in them.
 - [PS2 Half-Life tools](https://github.com/supadupaplex/ps2-hl-tools) — a collection of converters and other tools for various file formats used in the PS2 version of Half-Life, including .dol models, .spz sprites, and many more.
+- [Yet another PS2 Half-Life PC port](https://www.moddb.com/mods/yet-another-ps2-half-life-pc-port) — a Half-Life PC mod with converted PS2 resources and implementations of PS2 entities.
 - [PCSX2](https://pcsx2.net/) — a PlayStation 2 emulator for Windows, GNU/Linux and macOS.
 - [AetherSX2](https://aethersx2.com/) — a PlayStation 2 emulator for Android.
 
