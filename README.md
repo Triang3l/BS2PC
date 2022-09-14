@@ -75,7 +75,7 @@ The target machine must be little-endian.
 1. Create the `zlib` directory in the repository directory, download the [zlib source code](https://zlib.net/) (tested with version 1.2.12), and extract it into the `zlib` directory so that it contains files such as `deflate.c`.
 2. Download or build [Premake 5](https://premake.github.io/) (tested with version 5.0.0-beta1).
 3. [Run Premake](https://premake.github.io/docs/Using-Premake) to generate the project files for your C++ build system or IDE.
-4. Use the generated files in the `build` directory (the `bs2pc` solution) to build zlib and BS2PC. The generated files will be placed in `build/bin`.
+4. Use the generated files in the `build` directory (the `bs2pc` solution) to build zlib and BS2PC. The resulting executable will be placed in the configuration directory (`Debug` or `Release`) inside `build/bin`.
 
 ## `.bs2` format information
 
