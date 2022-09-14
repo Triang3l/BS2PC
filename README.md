@@ -126,6 +126,6 @@ However, you may consider the information about the Half-Life PS2 `.bs2` maps ob
 
 Certain parts of the project were taken from the source code of the Half-Life tools available under the [Half-Life 1 SDK License](https://github.com/ValveSoftware/halflife/blob/master/LICENSE). These are also heavily based on the Quake engine source code, being modifications of it made by Valve Corporation under a separate, proprietary Quake engine license, however, the Quake code they're derived from is available publicly under the GNU General Public License version 2.
 
-Bicubic resampling is based on the code in [https://github.com/Atrix256](Alan Wolfe)'s blog post "[Resizing Images With Bicubic Interpolation](https://blog.demofox.org/2015/08/15/resizing-images-with-bicubic-interpolation/)", provided under the [MIT License](https://blog.demofox.org/license/).
+Bicubic resampling is based on the code in [Alan Wolfe](https://github.com/Atrix256)'s blog post "[Resizing Images With Bicubic Interpolation](https://blog.demofox.org/2015/08/15/resizing-images-with-bicubic-interpolation/)", provided under the [MIT License](https://blog.demofox.org/license/).
 
 The project uses [zlib](https://zlib.net/), available under the [zlib License](https://zlib.net/zlib_license.html).
