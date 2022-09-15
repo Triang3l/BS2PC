@@ -2,7 +2,12 @@
 
 Converts maps between the PlayStation 2 and the PC versions of Half-Life, also supporting converting Quake maps to Half-Life for the PS2 or the PC.
 
-The Windows 32-bit x86 binary (built using Microsoft Visual Studio 2019, so may require the [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe)) is available in the [https://github.com/Triang3l/BS2PC/releases](Releases).
+The Windows 32-bit x86 binary (built using Microsoft Visual Studio 2019, so may require the [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe)) is available in the [GitHub Releases](https://github.com/Triang3l/BS2PC/releases).
+
+Officially supported upstreams:
+
+- [GitHub](https://github.com/Triang3l/BS2PC)
+- [GitFlic](https://gitflic.ru/project/triang3l/bs2pc)
 
 ## Features
 
